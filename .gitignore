@@ -1,0 +1,39 @@
+# System temp files
+.DS_Store
+Thumbs.db
+
+# VS Code profile settings
+.vscode/
+
+# Build packages
+builds/*
+*.zip
+*.crx
+*.pem
+node_modules/
+
+# Logs
+*.log
+
+# Local QA and comparison artifacts
+.compare-upstream/
+.compare-upstream-2/
+.qa-chrome-profile/
+.qa-chrome-profile-2/
+.qa-chrome-profile-3/
+.qa-chrome-profile-4/
+.qa-edge-profile/
+.qa-edge-profile-2/
+.qa-edge-profile-3/
+.qa-edge-profile-4/
+.qa-edge-profile-final/
+.qa-edge-profile-final-2/
+output/
+.codex-bg-test.txt
+chromedriver-extension-log.txt
+live_lists_base.html
+live_lists_mangho.html
+live_lists_verify.html
+seaf_live_list.html
+toast-mobile-fullpage.png
+toast-render-test.png
