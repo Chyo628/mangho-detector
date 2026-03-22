@@ -1,0 +1,12 @@
+{
+  "name": "mangho-detector",
+  "private": true,
+  "version": "0.3.0",
+  "scripts": {
+    "test": "node --test test/*.test.js test/**/*.test.js",
+    "test:watch": "node --test --watch test/*.test.js test/**/*.test.js"
+  },
+  "devDependencies": {
+    "jsdom": "^26.1.0"
+  }
+}
