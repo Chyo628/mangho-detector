@@ -59,15 +59,21 @@ test('normalizeSettings applies fixed polling, clamps toast duration, and upgrad
   const normalized = core.normalizeSettings({
     isDetectionActive: false,
     pollingInterval: 5,
-    toastDuration: 6
+    toastDuration: 6,
+    recentHistoryLimit: 99,
+    recentHistoryRetentionMinutes: 1
   });
 
   assert.equal(normalized.isDetectionActive, false);
   assert.equal(normalized.isSiteAlertEnabled, true);
   assert.equal(normalized.pollingInterval, 30);
   assert.equal(normalized.toastDuration, 10);
+  assert.equal(normalized.recentHistoryLimit, 30);
+  assert.equal(normalized.recentHistoryRetentionMinutes, 5);
   assert.equal(core.normalizeSettings({ toastDuration: 99 }).toastDuration, 30);
   assert.equal(core.normalizeSettings({ toastDuration: 1 }).toastDuration, 3);
+  assert.equal(core.normalizeSettings({}).recentHistoryLimit, 15);
+  assert.equal(core.normalizeSettings({}).recentHistoryRetentionMinutes, 30);
 });
 
 test('setupAlarm always creates a fixed 30 second interval', async () => {
@@ -143,6 +149,75 @@ test('getPopupPosts falls back to cache when fetch fails', async () => {
   assert.equal(response.unreadPosts[0].id, 21);
 });
 
+test('getPopupPosts decodes numeric entities in cached titles', async () => {
+  const { core } = createCore({
+    fetchImpl: createFetchFail('network down'),
+    chromeOptions: {
+      storageData: {
+        seaf_recent_posts: [{
+          id: 22,
+          title: '&#x267f;&#x267f;&#x267f; \uC77C\uC7A5\uC5F0 10 &#x267f;&#x267f;&#x267f;',
+          subject: '\uD5EC\uB9DD\uD638',
+          fullDateStr: '2026-03-09 10:04:00',
+          relativeTime: '\uBC29\uAE08',
+          postUrl: 'https://gall.dcinside.com/mgallery/board/view/?id=helldiversseries&no=22',
+          detectedAt: NOW
+        }],
+        seaf_unread_post_ids: [22]
+      }
+    }
+  });
+
+  const response = await core.getPopupPosts();
+
+  assert.equal(response.success, true);
+  assert.equal(response.source, 'cache');
+  assert.equal(response.unreadPosts[0].title, '\u267f\u267f\u267f \uC77C\uC7A5\uC5F0 10 \u267f\u267f\u267f');
+});
+
+test('getRecentPosts trims stored history by count and age and persists the trimmed cache', async () => {
+  const { core, fake } = createCore({
+    chromeOptions: {
+      storageData: {
+        seaf_recent_posts: [
+          {
+            id: 31,
+            title: 'recent 1',
+            subject: '\uD5EC\uB9DD\uD638',
+            fullDateStr: '',
+            postUrl: 'https://example.com/31',
+            detectedAt: NOW - (5 * 60 * 1000)
+          },
+          {
+            id: 30,
+            title: 'recent 2',
+            subject: '\uD5EC\uB9DD\uD638',
+            fullDateStr: '',
+            postUrl: 'https://example.com/30',
+            detectedAt: NOW - (10 * 60 * 1000)
+          },
+          {
+            id: 29,
+            title: 'expired',
+            subject: '\uD5EC\uB9DD\uD638',
+            fullDateStr: '',
+            postUrl: 'https://example.com/29',
+            detectedAt: NOW - (45 * 60 * 1000)
+          }
+        ]
+      }
+    }
+  });
+
+  const recentPosts = await core.getRecentPosts(core.normalizeSettings({
+    recentHistoryLimit: 2,
+    recentHistoryRetentionMinutes: 30
+  }));
+
+  assert.deepEqual(recentPosts.map((post) => post.id), [31, 30]);
+  assert.deepEqual(fake.state.storageData.seaf_recent_posts.map((post) => post.id), [31, 30]);
+});
+
 test('syncBadge reconciles stale unread ids against recent cached posts', async () => {
   const recentPosts = domain.parsePostsFromHtml(
     buildListHtml([{ id: 61, title: 'visible unread', fullDateStr: '2026-03-09 10:04:00' }]),
@@ -164,6 +239,47 @@ test('syncBadge reconciles stale unread ids against recent cached posts', async 
   await core.syncBadge(core.normalizeSettings({}));
 
   assert.deepEqual(fake.state.storageData.seaf_unread_post_ids, [61]);
+  assert.equal(fake.state.badgeTexts.at(-1).text, '1');
+});
+
+test('syncBadge prunes unread ids that fall outside retained recent history', async () => {
+  const { core, fake } = createCore({
+    chromeOptions: {
+      storageData: {
+        seaf_settings: {
+          recentHistoryLimit: 15,
+          recentHistoryRetentionMinutes: 30
+        },
+        seaf_recent_posts: [
+          {
+            id: 71,
+            title: 'still visible',
+            subject: '\uD5EC\uB9DD\uD638',
+            fullDateStr: '',
+            postUrl: 'https://example.com/71',
+            detectedAt: NOW - (10 * 60 * 1000)
+          },
+          {
+            id: 70,
+            title: 'expired unread',
+            subject: '\uD5EC\uB9DD\uD638',
+            fullDateStr: '',
+            postUrl: 'https://example.com/70',
+            detectedAt: NOW - (40 * 60 * 1000)
+          }
+        ],
+        seaf_unread_post_ids: [71, 70]
+      }
+    }
+  });
+
+  await core.syncBadge(core.normalizeSettings({
+    recentHistoryLimit: 15,
+    recentHistoryRetentionMinutes: 30
+  }));
+
+  assert.deepEqual(fake.state.storageData.seaf_recent_posts.map((post) => post.id), [71]);
+  assert.deepEqual(fake.state.storageData.seaf_unread_post_ids, [71]);
   assert.equal(fake.state.badgeTexts.at(-1).text, '1');
 });
 
@@ -254,7 +370,7 @@ test('performDetection uses badge and popup fallback on restricted tabs without 
   assert.equal(fake.state.storageData.seaf_last_surface_state.mode, 'limited');
 });
 
-test('joinPost marks the post as read before opening the join flow', async () => {
+test('joinPost clears the joined unread item and reconciles against retained history before opening the join flow', async () => {
   const steamLink = 'steam://joinlobby/553850/12345678901234567/76561198000000000';
   const { core, fake } = createCore({
     fetchImpl: createFetchSequence([`<div>${steamLink}</div>`]),
@@ -268,8 +384,8 @@ test('joinPost marks the post as read before opening the join flow', async () =>
   const response = await core.joinPost(71, {});
 
   assert.equal(response.success, true);
-  assert.deepEqual(fake.state.storageData.seaf_unread_post_ids, [70]);
-  assert.equal(fake.state.badgeTexts.at(-1).text, '1');
+  assert.deepEqual(fake.state.storageData.seaf_unread_post_ids, []);
+  assert.equal(fake.state.badgeTexts.at(-1).text, '');
   assert.deepEqual(fake.state.createdTabs, [{ url: steamLink }]);
 });
 
@@ -330,4 +446,29 @@ test('triggerTestToast sends a test message to the active helldivers list tab', 
   assert.equal(fake.state.sentMessages[0].tabId, 5);
   assert.equal(fake.state.sentMessages[0].payload.type, 'SEAF_TEST_TOAST');
   assert.equal(fake.state.sentMessages[0].payload.toastDuration, 7000);
+});
+
+test('getPopupPosts decodes numeric entities in fetched titles', async () => {
+  const expectedTitle = '\u267f\u267f\u267f \uC77C\uC7A5\uC5F0 10 \u267f\u267f\u267f';
+  const html = buildListHtml([
+    {
+      id: 12,
+      title: '&#x267f;&#x267f;&#x267f; \uC77C\uC7A5\uC5F0 10 &#x267f;&#x267f;&#x267f;',
+      fullDateStr: '2026-03-09 10:04:00'
+    }
+  ]);
+  const { core, fake } = createCore({
+    fetchImpl: createFetchOk(html),
+    chromeOptions: {
+      storageData: {
+        seaf_unread_post_ids: [12]
+      }
+    }
+  });
+
+  const response = await core.getPopupPosts();
+
+  assert.equal(response.unreadPosts[0].title, expectedTitle);
+  assert.equal(response.historyPosts[0].title, expectedTitle);
+  assert.equal(fake.state.storageData.seaf_recent_posts[0].title, expectedTitle);
 });

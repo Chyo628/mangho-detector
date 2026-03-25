@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const domain = require('../scripts/shared/seaf-domain.js');
+const { buildListHtml } = require('./helpers/build-list-html');
 const { loadHtml } = require('./helpers/load-html');
 
 test('isHelldiversListUrl accepts supported list URLs and rejects others', () => {
@@ -54,6 +55,145 @@ test('isManghoSubject matches only hel-mangho subject labels', () => {
   assert.equal(domain.isManghoSubject(' \uD5EC\uB9DD\uD638 '), true);
   assert.equal(domain.isManghoSubject('\uB9DD\uD638'), false);
   assert.equal(domain.isManghoSubject('\uB9F9\uD638'), false);
+});
+
+test('decodeHtmlEntities decodes named, numeric, and double-encoded numeric entities', () => {
+  assert.equal(
+    domain.decodeHtmlEntities('&amp;#x267f; &#x267f; &#9855; &amp; &quot;'),
+    '\u267f \u267f \u267f & "'
+  );
+});
+
+test('parsePostsFromHtml decodes numeric entities in titles', () => {
+  const posts = domain.parsePostsFromHtml(
+    buildListHtml([{
+      id: 99,
+      title: '&#x267f;&#x267f;&#x267f; \uC77C\uC7A5\uC5F0 10 &#x267f;&#x267f;&#x267f;',
+      fullDateStr: '2026-03-09 10:04:00'
+    }]),
+    {
+      currentTime: Date.parse('2026-03-09T01:05:00Z'),
+      limit: domain.constants.LIVE_POST_LIMIT,
+      viewUrlPrefix: domain.constants.VIEW_URL_PREFIX
+    }
+  );
+
+  assert.equal(posts.length, 1);
+  assert.equal(posts[0].title, '\u267f\u267f\u267f \uC77C\uC7A5\uC5F0 10 \u267f\u267f\u267f');
+});
+
+test('refreshRelativeTimes decodes cached titles that still contain numeric entities', () => {
+  const posts = domain.refreshRelativeTimes(
+    [{
+      id: 100,
+      title: '&#x267f;&#x267f;&#x267f; \uC77C\uC7A5\uC5F0 10 &#x267f;&#x267f;&#x267f;',
+      subject: '\uD5EC\uB9DD\uD638',
+      fullDateStr: '2026-03-09 10:04:00',
+      postUrl: 'https://example.com/100',
+      detectedAt: Date.parse('2026-03-09T01:04:00Z')
+    }],
+    {
+      currentTime: Date.parse('2026-03-09T01:05:00Z')
+    }
+  );
+
+  assert.equal(posts[0].title, '\u267f\u267f\u267f \uC77C\uC7A5\uC5F0 10 \u267f\u267f\u267f');
+});
+
+test('trimRecentHistoryPosts enforces age and count limits together', () => {
+  const currentTime = Date.parse('2026-03-09T01:05:00Z');
+  const posts = domain.trimRecentHistoryPosts(
+    [
+      {
+        id: 13,
+        title: 'newest',
+        subject: domain.constants.MANGHO_SUBJECTS[0],
+        fullDateStr: '',
+        postUrl: 'https://example.com/13',
+        detectedAt: currentTime - 2 * 60 * 1000
+      },
+      {
+        id: 12,
+        title: 'second',
+        subject: domain.constants.MANGHO_SUBJECTS[0],
+        fullDateStr: '',
+        postUrl: 'https://example.com/12',
+        detectedAt: currentTime - 10 * 60 * 1000
+      },
+      {
+        id: 11,
+        title: 'expired',
+        subject: domain.constants.MANGHO_SUBJECTS[0],
+        fullDateStr: '',
+        postUrl: 'https://example.com/11',
+        detectedAt: currentTime - 40 * 60 * 1000
+      }
+    ],
+    {
+      currentTime,
+      maxCount: 2,
+      maxAgeMs: 30 * 60 * 1000,
+      viewUrlPrefix: 'https://example.com/'
+    }
+  );
+
+  assert.deepEqual(posts.map((post) => post.id), [13, 12]);
+});
+
+test('trimRecentHistoryPosts enforces default count and retention windows', () => {
+  const currentTime = Date.parse('2026-03-09T01:30:00Z');
+  const posts = Array.from({ length: 18 }, (_, index) => ({
+    id: 200 - index,
+    title: `history ${200 - index}`,
+    subject: domain.constants.MANGHO_SUBJECTS[0],
+    fullDateStr: '',
+    postUrl: `https://example.com/${200 - index}`,
+    detectedAt: currentTime - (index * 60 * 1000)
+  }));
+
+  const trimmed = domain.trimRecentHistoryPosts(posts, { currentTime });
+
+  assert.equal(trimmed.length, 15);
+  assert.equal(trimmed[0].id, 200);
+  assert.equal(trimmed.at(-1).id, 186);
+});
+
+test('trimRecentHistoryPosts respects explicit count and age settings', () => {
+  const currentTime = Date.parse('2026-03-09T01:30:00Z');
+  const posts = [
+    {
+      id: 51,
+      title: 'recent 1',
+      subject: domain.constants.MANGHO_SUBJECTS[0],
+      fullDateStr: '',
+      postUrl: 'https://example.com/51',
+      detectedAt: currentTime - (5 * 60 * 1000)
+    },
+    {
+      id: 50,
+      title: 'recent 2',
+      subject: domain.constants.MANGHO_SUBJECTS[0],
+      fullDateStr: '',
+      postUrl: 'https://example.com/50',
+      detectedAt: currentTime - (20 * 60 * 1000)
+    },
+    {
+      id: 49,
+      title: 'expired',
+      subject: domain.constants.MANGHO_SUBJECTS[0],
+      fullDateStr: '',
+      postUrl: 'https://example.com/49',
+      detectedAt: currentTime - (40 * 60 * 1000)
+    }
+  ];
+
+  const trimmed = domain.trimRecentHistoryPosts(posts, {
+    currentTime,
+    maxCount: 2,
+    maxAgeMs: 30 * 60 * 1000
+  });
+
+  assert.deepEqual(trimmed.map((post) => post.id), [51, 50]);
 });
 
 test('filterRecentOpenPosts excludes closed and stale posts', () => {

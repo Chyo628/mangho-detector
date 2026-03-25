@@ -508,6 +508,18 @@ body {
   gap: 0;
 }
 
+.seaf-settings-panel[data-collapsed="true"] .seaf-panel-head {
+  margin-bottom: 0;
+}
+
+.seaf-settings-body {
+  display: grid;
+}
+
+.seaf-settings-body[hidden] {
+  display: none;
+}
+
 .seaf-setting-row {
   display: flex;
   align-items: center;

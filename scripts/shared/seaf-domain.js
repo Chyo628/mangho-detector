@@ -6,9 +6,16 @@
       '\uD5EC\uB9DD\uD638'
     ],
     RECENT_POST_WINDOW_MS: 10 * 60 * 1000,
+    DEFAULT_RECENT_HISTORY_LIMIT: 15,
+    MIN_RECENT_HISTORY_LIMIT: 1,
+    MAX_RECENT_HISTORY_LIMIT: 30,
     LIVE_POST_LIMIT: 20,
     POPUP_POST_LIMIT: 3,
-    RECENT_POST_LIMIT: 12,
+    RECENT_POST_LIMIT: 15,
+    DEFAULT_RECENT_HISTORY_RETENTION_MINUTES: 30,
+    MIN_RECENT_HISTORY_RETENTION_MINUTES: 5,
+    MAX_RECENT_HISTORY_RETENTION_MINUTES: 180,
+    RECENT_HISTORY_RETENTION_MINUTES: 30,
     KST_OFFSET_MS: 9 * 60 * 60 * 1000,
     CLOSED_RECRUITMENT_REGEX: /4\/4|\uD480\uBC29|\uB9C8\uAC10|\uC644\uB8CC|\uC885\uB8CC/i
   };
@@ -28,13 +35,46 @@
     return String(value || '').replace(/<[^>]*>/g, '');
   }
 
+  function decodeNumericHtmlEntity(match, hexDigits, decimalDigits) {
+    const codePoint = Number.parseInt(
+      hexDigits || decimalDigits,
+      hexDigits ? 16 : 10
+    );
+
+    if (!Number.isFinite(codePoint) || codePoint < 0 || codePoint > 0x10FFFF) {
+      return match;
+    }
+
+    try {
+      return String.fromCodePoint(codePoint);
+    } catch (error) {
+      return match;
+    }
+  }
+
   function decodeHtmlEntities(value) {
-    return String(value || '')
-      .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/&quot;/g, '"')
-      .replace(/&#39;/g, "'");
+    let decodedValue = String(value || '');
+
+    for (let passIndex = 0; passIndex < 3; passIndex += 1) {
+      const nextValue = decodedValue
+        .replace(/&amp;/g, '&')
+        .replace(/&lt;/g, '<')
+        .replace(/&gt;/g, '>')
+        .replace(/&quot;/g, '"')
+        .replace(/&#39;/g, "'")
+        .replace(
+          /&#(?:x([0-9a-fA-F]+)|([0-9]+));/g,
+          (match, hexDigits, decimalDigits) => decodeNumericHtmlEntity(match, hexDigits, decimalDigits)
+        );
+
+      if (nextValue === decodedValue) {
+        break;
+      }
+
+      decodedValue = nextValue;
+    }
+
+    return decodedValue;
   }
 
   function isManghoSubject(subject) {
@@ -225,8 +265,8 @@
 
     return {
       id: normalizedId,
-      title: String(post?.title || ''),
-      subject: String(post?.subject || ''),
+      title: decodeHtmlEntities(String(post?.title || '')),
+      subject: decodeHtmlEntities(String(post?.subject || '')),
       fullDateStr: String(post?.fullDateStr || ''),
       relativeTime: post?.fullDateStr
         ? formatRelativeTime(post.fullDateStr, currentTime)
@@ -277,12 +317,7 @@
   function refreshRelativeTimes(posts, options = {}) {
     const { currentTime = Date.now() } = options;
 
-    return posts.map((post) => ({
-      ...post,
-      relativeTime: post.fullDateStr
-        ? formatRelativeTime(post.fullDateStr, currentTime)
-        : formatDetectedTime(post.detectedAt, currentTime)
-    }));
+    return posts.map((post) => normalizePost(post, { currentTime }));
   }
 
   function filterRecentOpenPosts(posts, options = {}) {
@@ -295,6 +330,43 @@
     return mergePosts(posts, [], { currentTime, viewUrlPrefix })
       .filter((post) => isOpenRecruitment(post, currentTime))
       .slice(0, Number.isFinite(limit) ? limit : undefined);
+  }
+
+  function trimRecentHistoryPosts(posts, options = {}) {
+    const {
+      currentTime = Date.now(),
+      maxCount = constants.DEFAULT_RECENT_HISTORY_LIMIT,
+      maxAgeMs = constants.DEFAULT_RECENT_HISTORY_RETENTION_MINUTES * 60 * 1000,
+      viewUrlPrefix = constants.VIEW_URL_PREFIX
+    } = options;
+    const normalizedMaxCount = Number.isFinite(Number(maxCount))
+      ? Math.min(
+        constants.MAX_RECENT_HISTORY_LIMIT,
+        Math.max(constants.MIN_RECENT_HISTORY_LIMIT, Math.round(Number(maxCount)))
+      )
+      : constants.DEFAULT_RECENT_HISTORY_LIMIT;
+    const normalizedMaxAgeMs = Number.isFinite(Number(maxAgeMs))
+      ? Math.min(
+        constants.MAX_RECENT_HISTORY_RETENTION_MINUTES * 60 * 1000,
+        Math.max(constants.MIN_RECENT_HISTORY_RETENTION_MINUTES * 60 * 1000, Number(maxAgeMs))
+      )
+      : constants.DEFAULT_RECENT_HISTORY_RETENTION_MINUTES * 60 * 1000;
+
+    return mergePosts(posts, [], { currentTime, viewUrlPrefix })
+      .filter((post) => {
+        const detectedAt = Number(post?.detectedAt);
+        const detectedAgeMs = currentTime - detectedAt;
+        return Number.isFinite(detectedAt) && detectedAgeMs >= 0 && detectedAgeMs <= normalizedMaxAgeMs;
+      })
+      .sort((left, right) => {
+        const detectedAtDiff = (Number(right?.detectedAt) || 0) - (Number(left?.detectedAt) || 0);
+        if (detectedAtDiff !== 0) {
+          return detectedAtDiff;
+        }
+
+        return (Number(right?.id) || 0) - (Number(left?.id) || 0);
+      })
+      .slice(0, normalizedMaxCount);
   }
 
   function extractLobbyLinkFromHtml(html) {
@@ -318,6 +390,7 @@
     mergePosts,
     refreshRelativeTimes,
     filterRecentOpenPosts,
+    trimRecentHistoryPosts,
     extractLobbyLinkFromHtml
   };
 

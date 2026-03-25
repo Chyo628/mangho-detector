@@ -12,7 +12,8 @@ function installDom(html, url) {
     Node: global.Node,
     Element: global.Element,
     MutationObserver: global.MutationObserver,
-    navigator: global.navigator
+    navigator: global.navigator,
+    localStorage: global.localStorage
   };
 
   global.window = dom.window;
@@ -21,6 +22,7 @@ function installDom(html, url) {
   global.Element = dom.window.Element;
   global.MutationObserver = dom.window.MutationObserver;
   global.navigator = dom.window.navigator;
+  global.localStorage = dom.window.localStorage;
 
   return {
     dom,
