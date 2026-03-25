@@ -111,62 +111,113 @@
         <div class="seaf-loading-status" id="seaf-loading-status"></div>
       </section>
 
-      <section class="seaf-settings-panel">
+      <section class="seaf-settings-panel" id="seaf-settings-panel" data-collapsed="false">
         <div class="seaf-panel-head">
           <div>
             <p class="seaf-panel-title">설정</p>
-            <p class="seaf-panel-copy">감지와 브라우저 알림 동작만 빠르게 조정합니다.</p>
+            <p class="seaf-panel-copy">감지와 브라우저 알림 동작을 빠르게 조정합니다.</p>
           </div>
-        </div>
-
-        <label class="seaf-setting-row" for="seaf-detection-toggle">
-          <span class="seaf-setting-copy">
-            <span class="seaf-setting-label">실시간 감지</span>
-            <span class="seaf-setting-hint">30초 간격으로 목록을 자동 확인합니다.</span>
-          </span>
-          <span class="seaf-toggle">
-            <input type="checkbox" id="seaf-detection-toggle">
-            <span class="seaf-toggle-track"></span>
-          </span>
-        </label>
-
-        <label class="seaf-setting-row" for="seaf-site-alert-toggle">
-          <span class="seaf-setting-copy">
-            <span class="seaf-setting-label">브라우저 알림</span>
-            <span class="seaf-setting-hint">탭 오버레이와 배지 알림을 함께 제어합니다.</span>
-          </span>
-          <span class="seaf-toggle">
-            <input type="checkbox" id="seaf-site-alert-toggle">
-            <span class="seaf-toggle-track"></span>
-          </span>
-        </label>
-
-        <div class="seaf-setting-row seaf-setting-row-static">
-          <div class="seaf-setting-copy">
-            <div class="seaf-setting-label">감지 주기</div>
-            <div class="seaf-setting-hint">Chrome MV3 제한으로 30초 고정입니다.</div>
-          </div>
-          <div class="seaf-setting-value" id="seaf-polling-interval-value">30초 고정</div>
-        </div>
-
-        <label class="seaf-setting-row" for="seaf-toast-duration-input">
-          <span class="seaf-setting-copy">
-            <span class="seaf-setting-label">오버레이 표시 시간</span>
-            <span class="seaf-setting-hint">3초부터 30초까지 조정할 수 있습니다.</span>
-          </span>
-          <span class="seaf-number-input-wrap">
-            <input
-              type="number"
-              id="seaf-toast-duration-input"
-              class="seaf-number-input"
-              inputmode="numeric"
-              min="3"
-              max="30"
-              step="1"
+          <div class="seaf-panel-tools">
+            <button
+              type="button"
+              id="seaf-settings-toggle-button"
+              class="seaf-panel-toggle"
+              aria-expanded="true"
+              aria-controls="seaf-settings-body"
             >
-            <span class="seaf-input-suffix">초</span>
-          </span>
-        </label>
+              접기
+            </button>
+          </div>
+        </div>
+
+        <div class="seaf-settings-body" id="seaf-settings-body">
+          <label class="seaf-setting-row" for="seaf-detection-toggle">
+            <span class="seaf-setting-copy">
+              <span class="seaf-setting-label">실시간 감지</span>
+              <span class="seaf-setting-hint">30초 간격으로 목록을 자동 확인합니다.</span>
+            </span>
+            <span class="seaf-toggle">
+              <input type="checkbox" id="seaf-detection-toggle">
+              <span class="seaf-toggle-track"></span>
+            </span>
+          </label>
+
+          <label class="seaf-setting-row" for="seaf-site-alert-toggle">
+            <span class="seaf-setting-copy">
+              <span class="seaf-setting-label">브라우저 알림</span>
+              <span class="seaf-setting-hint">탭 오버레이와 배지 알림을 함께 제어합니다.</span>
+            </span>
+            <span class="seaf-toggle">
+              <input type="checkbox" id="seaf-site-alert-toggle">
+              <span class="seaf-toggle-track"></span>
+            </span>
+          </label>
+
+          <div class="seaf-setting-row seaf-setting-row-static">
+            <div class="seaf-setting-copy">
+              <div class="seaf-setting-label">감지 주기</div>
+              <div class="seaf-setting-hint">Chrome MV3 제한으로 30초 고정입니다.</div>
+            </div>
+            <div class="seaf-setting-value" id="seaf-polling-interval-value">30초 고정</div>
+          </div>
+
+          <label class="seaf-setting-row" for="seaf-toast-duration-input">
+            <span class="seaf-setting-copy">
+              <span class="seaf-setting-label">오버레이 표시 시간</span>
+              <span class="seaf-setting-hint">3초부터 30초까지 조정할 수 있습니다.</span>
+            </span>
+            <span class="seaf-number-input-wrap">
+              <input
+                type="number"
+                id="seaf-toast-duration-input"
+                class="seaf-number-input"
+                inputmode="numeric"
+                min="3"
+                max="30"
+                step="1"
+              >
+              <span class="seaf-input-suffix">초</span>
+            </span>
+          </label>
+
+          <label class="seaf-setting-row" for="seaf-history-limit-input">
+            <span class="seaf-setting-copy">
+              <span class="seaf-setting-label">최근 감지 기록 최대 개수</span>
+              <span class="seaf-setting-hint">최신 기록을 최대 30개까지 유지합니다.</span>
+            </span>
+            <span class="seaf-number-input-wrap">
+              <input
+                type="number"
+                id="seaf-history-limit-input"
+                class="seaf-number-input"
+                inputmode="numeric"
+                min="1"
+                max="30"
+                step="1"
+              >
+              <span class="seaf-input-suffix">개</span>
+            </span>
+          </label>
+
+          <label class="seaf-setting-row" for="seaf-history-retention-input">
+            <span class="seaf-setting-copy">
+              <span class="seaf-setting-label">최근 감지 기록 보존 시간</span>
+              <span class="seaf-setting-hint">감지 후 최대 180분까지 기록을 유지합니다.</span>
+            </span>
+            <span class="seaf-number-input-wrap">
+              <input
+                type="number"
+                id="seaf-history-retention-input"
+                class="seaf-number-input"
+                inputmode="numeric"
+                min="5"
+                max="180"
+                step="1"
+              >
+              <span class="seaf-input-suffix">분</span>
+            </span>
+          </label>
+        </div>
       </section>
     </main>
   </div>

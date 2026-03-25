@@ -11,6 +11,12 @@
   const DEFAULT_TOAST_DURATION_SECONDS = 10;
   const MIN_TOAST_DURATION_SECONDS = 3;
   const MAX_TOAST_DURATION_SECONDS = 30;
+  const DEFAULT_RECENT_HISTORY_LIMIT = 15;
+  const MIN_RECENT_HISTORY_LIMIT = 1;
+  const MAX_RECENT_HISTORY_LIMIT = 30;
+  const DEFAULT_RECENT_HISTORY_RETENTION_MINUTES = 30;
+  const MIN_RECENT_HISTORY_RETENTION_MINUTES = 5;
+  const MAX_RECENT_HISTORY_RETENTION_MINUTES = 180;
   const JOIN_HELPER_PATH = 'helper/join.html';
   const UNSUPPORTED_TEST_TAB_ERROR = '현재 탭에서는 오버레이 테스트를 실행할 수 없습니다.';
   const LIST_PAGE_NOT_READY_ERROR = '목록 페이지가 아직 준비되지 않았습니다.';
@@ -21,7 +27,9 @@
     isDetectionActive: true,
     pollingInterval: FIXED_POLLING_INTERVAL_SECONDS,
     toastDuration: DEFAULT_TOAST_DURATION_SECONDS,
-    isSiteAlertEnabled: true
+    isSiteAlertEnabled: true,
+    recentHistoryLimit: DEFAULT_RECENT_HISTORY_LIMIT,
+    recentHistoryRetentionMinutes: DEFAULT_RECENT_HISTORY_RETENTION_MINUTES
   };
 
   function createBackgroundCore({
@@ -37,6 +45,7 @@
       filterRecentOpenPosts,
       refreshRelativeTimes,
       mergePosts,
+      trimRecentHistoryPosts,
       extractLobbyLinkFromHtml,
       isHelldiversListUrl
     } = domain;
@@ -53,6 +62,30 @@
       return Math.min(
         MAX_TOAST_DURATION_SECONDS,
         Math.max(MIN_TOAST_DURATION_SECONDS, Math.round(numericValue))
+      );
+    }
+
+    function clampRecentHistoryLimit(value) {
+      const numericValue = Number(value);
+      if (!Number.isFinite(numericValue)) {
+        return DEFAULT_RECENT_HISTORY_LIMIT;
+      }
+
+      return Math.min(
+        MAX_RECENT_HISTORY_LIMIT,
+        Math.max(MIN_RECENT_HISTORY_LIMIT, Math.round(numericValue))
+      );
+    }
+
+    function clampRecentHistoryRetentionMinutes(value) {
+      const numericValue = Number(value);
+      if (!Number.isFinite(numericValue)) {
+        return DEFAULT_RECENT_HISTORY_RETENTION_MINUTES;
+      }
+
+      return Math.min(
+        MAX_RECENT_HISTORY_RETENTION_MINUTES,
+        Math.max(MIN_RECENT_HISTORY_RETENTION_MINUTES, Math.round(numericValue))
       );
     }
 
@@ -74,8 +107,24 @@
       normalizedSettings.isSiteAlertEnabled = Boolean(normalizedSettings.isSiteAlertEnabled);
       normalizedSettings.pollingInterval = FIXED_POLLING_INTERVAL_SECONDS;
       normalizedSettings.toastDuration = clampToastDuration(normalizedSettings.toastDuration);
+      normalizedSettings.recentHistoryLimit = clampRecentHistoryLimit(
+        normalizedSettings.recentHistoryLimit
+      );
+      normalizedSettings.recentHistoryRetentionMinutes = clampRecentHistoryRetentionMinutes(
+        normalizedSettings.recentHistoryRetentionMinutes
+      );
 
       return normalizedSettings;
+    }
+
+    function getRecentHistoryOptions(settings, currentTime = now()) {
+      const resolvedSettings = normalizeSettings(settings);
+      return {
+        currentTime,
+        maxCount: resolvedSettings.recentHistoryLimit,
+        maxAgeMs: resolvedSettings.recentHistoryRetentionMinutes * 60 * 1000,
+        viewUrlPrefix: DOMAIN_CONSTANTS.VIEW_URL_PREFIX
+      };
     }
 
     async function ensureSettings(options = {}) {
@@ -203,7 +252,7 @@
       }
 
       const resolvedSettings = settings || await ensureSettings();
-      const recentPosts = await getRecentPosts();
+      const recentPosts = await getRecentPosts(resolvedSettings);
       const { unreadIds } = await reconcileUnreadPosts(recentPosts);
       const shouldShowBadge = resolvedSettings.isSiteAlertEnabled && unreadIds.length > 0;
       const badgeText = shouldShowBadge
@@ -257,15 +306,23 @@
       });
     }
 
-    async function getRecentPosts() {
+    async function getRecentPosts(settings = null) {
       const { [RECENT_POSTS_KEY]: storedPosts } = await chromeApi.storage.local.get([RECENT_POSTS_KEY]);
       if (!Array.isArray(storedPosts)) {
         return [];
       }
 
-      return refreshRelativeTimes(storedPosts, { currentTime: now() })
-        .filter((post) => Number.isFinite(post.id) && post.title)
-        .slice(0, DOMAIN_CONSTANTS.RECENT_POST_LIMIT);
+      const resolvedSettings = settings || await ensureSettings();
+      const trimmedPosts = trimRecentHistoryPosts(
+        storedPosts,
+        getRecentHistoryOptions(resolvedSettings)
+      ).filter((post) => Number.isFinite(post.id) && post.title);
+
+      if (!areStoredPostsEquivalent(storedPosts, trimmedPosts)) {
+        await chromeApi.storage.local.set({ [RECENT_POSTS_KEY]: trimmedPosts });
+      }
+
+      return trimmedPosts;
     }
 
     function areStoredPostsEquivalent(leftPosts, rightPosts) {
@@ -285,16 +342,20 @@
       });
     }
 
-    async function storeRecentPosts(posts) {
+    async function storeRecentPosts(posts, settings = null) {
       if (!Array.isArray(posts) || posts.length === 0) {
         return;
       }
 
-      const existingPosts = await getRecentPosts();
-      const mergedPosts = mergePosts(posts, existingPosts, {
-        currentTime: now(),
-        viewUrlPrefix: DOMAIN_CONSTANTS.VIEW_URL_PREFIX
-      }).slice(0, DOMAIN_CONSTANTS.RECENT_POST_LIMIT);
+      const resolvedSettings = settings || await ensureSettings();
+      const existingPosts = await getRecentPosts(resolvedSettings);
+      const mergedPosts = trimRecentHistoryPosts(
+        mergePosts(posts, existingPosts, {
+          currentTime: now(),
+          viewUrlPrefix: DOMAIN_CONSTANTS.VIEW_URL_PREFIX
+        }),
+        getRecentHistoryOptions(resolvedSettings)
+      );
 
       if (areStoredPostsEquivalent(existingPosts, mergedPosts)) {
         return;
@@ -463,7 +524,7 @@
       return unreadIds
         .map((postId) => postById.get(postId))
         .filter(Boolean)
-        .slice(0, DOMAIN_CONSTANTS.RECENT_POST_LIMIT);
+        .slice(0, recentPosts.length);
     }
 
     async function reconcileUnreadPosts(recentPosts) {
@@ -486,7 +547,7 @@
 
     async function buildPopupPayload({ source, fallback = false, error = null }) {
       const settings = await ensureSettings();
-      const recentPosts = await getRecentPosts();
+      const recentPosts = await getRecentPosts(settings);
       const { unreadIds, unreadPosts } = await reconcileUnreadPosts(recentPosts);
       const lastScanAt = await getLastScanAt();
       const surfaceState = await getLastSurfaceState();
@@ -509,9 +570,10 @@
 
     async function getPopupPosts() {
       try {
+        const settings = await ensureSettings();
         const livePosts = await fetchLivePosts();
         if (livePosts.length > 0) {
-          await storeRecentPosts(livePosts);
+          await storeRecentPosts(livePosts, settings);
         }
 
         return buildPopupPayload({ source: 'fetch' });
@@ -538,7 +600,7 @@
       const detectionTime = now();
       const posts = await fetchLivePosts();
       if (posts.length > 0) {
-        await storeRecentPosts(posts);
+        await storeRecentPosts(posts, resolvedSettings);
       }
 
       if (posts.length === 0) {
@@ -805,6 +867,12 @@
       FIXED_POLLING_INTERVAL_SECONDS,
       MIN_TOAST_DURATION_SECONDS,
       MAX_TOAST_DURATION_SECONDS,
+      DEFAULT_RECENT_HISTORY_LIMIT,
+      MIN_RECENT_HISTORY_LIMIT,
+      MAX_RECENT_HISTORY_LIMIT,
+      DEFAULT_RECENT_HISTORY_RETENTION_MINUTES,
+      MIN_RECENT_HISTORY_RETENTION_MINUTES,
+      MAX_RECENT_HISTORY_RETENTION_MINUTES,
       LAST_SEEN_KEY,
       RECENT_POSTS_KEY,
       SETTINGS_KEY,
@@ -816,6 +884,8 @@
       LIST_PAGE_NOT_READY_ERROR,
       LOBBY_LINK_NOT_FOUND_ERROR,
       clampToastDuration,
+      clampRecentHistoryLimit,
+      clampRecentHistoryRetentionMinutes,
       normalizeSettings,
       ensureSettings,
       handleStorageChanged,

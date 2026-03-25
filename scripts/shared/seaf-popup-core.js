@@ -3,15 +3,23 @@
   const DEFAULT_TOAST_DURATION_SECONDS = 10;
   const MIN_TOAST_DURATION_SECONDS = 3;
   const MAX_TOAST_DURATION_SECONDS = 30;
+  const DEFAULT_RECENT_HISTORY_LIMIT = 15;
+  const MIN_RECENT_HISTORY_LIMIT = 1;
+  const MAX_RECENT_HISTORY_LIMIT = 30;
+  const DEFAULT_RECENT_HISTORY_RETENTION_MINUTES = 30;
+  const MIN_RECENT_HISTORY_RETENTION_MINUTES = 5;
+  const MAX_RECENT_HISTORY_RETENTION_MINUTES = 180;
   const DEFAULT_SETTINGS = {
     isDetectionActive: true,
     pollingInterval: FIXED_POLLING_INTERVAL_SECONDS,
     toastDuration: DEFAULT_TOAST_DURATION_SECONDS,
-    isSiteAlertEnabled: true
+    isSiteAlertEnabled: true,
+    recentHistoryLimit: DEFAULT_RECENT_HISTORY_LIMIT,
+    recentHistoryRetentionMinutes: DEFAULT_RECENT_HISTORY_RETENTION_MINUTES
   };
   const RECENT_POSTS_KEY = 'seaf_recent_posts';
   const UNREAD_POST_IDS_KEY = 'seaf_unread_post_ids';
-  const UNSUPPORTED_TEST_TAB_ERROR = '현재 탭에는 오버레이 테스트를 표시할 수 없습니다.';
+  const UNSUPPORTED_TEST_TAB_ERROR = '현재 탭에서는 오버레이 테스트를 실행할 수 없습니다.';
   const LIST_PAGE_NOT_READY_ERROR = '목록 페이지가 아직 준비되지 않았습니다.';
 
   function createPopupCore({
@@ -26,7 +34,7 @@
       filterRecentOpenPosts,
       extractLobbyLinkFromHtml,
       mergePosts,
-      refreshRelativeTimes,
+      trimRecentHistoryPosts,
       isHelldiversListUrl
     } = domain;
 
@@ -42,6 +50,30 @@
       );
     }
 
+    function normalizeRecentHistoryLimit(value) {
+      const numericValue = Number(value);
+      if (!Number.isFinite(numericValue)) {
+        return DEFAULT_RECENT_HISTORY_LIMIT;
+      }
+
+      return Math.min(
+        MAX_RECENT_HISTORY_LIMIT,
+        Math.max(MIN_RECENT_HISTORY_LIMIT, Math.round(numericValue))
+      );
+    }
+
+    function normalizeRecentHistoryRetentionMinutes(value) {
+      const numericValue = Number(value);
+      if (!Number.isFinite(numericValue)) {
+        return DEFAULT_RECENT_HISTORY_RETENTION_MINUTES;
+      }
+
+      return Math.min(
+        MAX_RECENT_HISTORY_RETENTION_MINUTES,
+        Math.max(MIN_RECENT_HISTORY_RETENTION_MINUTES, Math.round(numericValue))
+      );
+    }
+
     function normalizeSettings(savedSettings) {
       const normalizedSettings = {
         ...DEFAULT_SETTINGS,
@@ -52,8 +84,24 @@
       normalizedSettings.isSiteAlertEnabled = Boolean(normalizedSettings.isSiteAlertEnabled);
       normalizedSettings.pollingInterval = FIXED_POLLING_INTERVAL_SECONDS;
       normalizedSettings.toastDuration = normalizeToastDuration(normalizedSettings.toastDuration);
+      normalizedSettings.recentHistoryLimit = normalizeRecentHistoryLimit(
+        normalizedSettings.recentHistoryLimit
+      );
+      normalizedSettings.recentHistoryRetentionMinutes = normalizeRecentHistoryRetentionMinutes(
+        normalizedSettings.recentHistoryRetentionMinutes
+      );
 
       return normalizedSettings;
+    }
+
+    function getRecentHistoryOptions(settings, currentTime = now()) {
+      const normalizedSettings = normalizeSettings(settings);
+      return {
+        currentTime,
+        maxCount: normalizedSettings.recentHistoryLimit,
+        maxAgeMs: normalizedSettings.recentHistoryRetentionMinutes * 60 * 1000,
+        viewUrlPrefix: DOMAIN_CONSTANTS.VIEW_URL_PREFIX
+      };
     }
 
     async function loadSettings() {
@@ -107,7 +155,7 @@
       }
 
       if (response.source === 'cache') {
-        return '실시간 조회에 실패해 저장된 기록을 보여주고 있습니다.';
+        return '실시간 조회에 실패해 저장된 최근 기록을 보여줍니다.';
       }
 
       return '';
@@ -116,10 +164,7 @@
     function formatLastScanLabel(lastScanAt, response = null) {
       const numericValue = Number(lastScanAt);
       if (!Number.isFinite(numericValue)) {
-        if (response?.cached) {
-          return '캐시';
-        }
-        return '대기 중';
+        return response?.cached ? '캐시' : '대기 중';
       }
 
       const diffMs = Math.max(0, now() - numericValue);
@@ -150,30 +195,6 @@
       return response.text();
     }
 
-    async function getStoredRecentPosts() {
-      const { [RECENT_POSTS_KEY]: storedPosts } = await chromeApi.storage.local.get([RECENT_POSTS_KEY]);
-      if (!Array.isArray(storedPosts)) {
-        return [];
-      }
-
-      return refreshRelativeTimes(storedPosts, { currentTime: now() })
-        .filter((post) => Number.isFinite(post.id) && post.title)
-        .slice(0, DOMAIN_CONSTANTS.RECENT_POST_LIMIT);
-    }
-
-    async function getStoredUnreadPostIds() {
-      const { [UNREAD_POST_IDS_KEY]: unreadIds } = await chromeApi.storage.local.get([UNREAD_POST_IDS_KEY]);
-      if (!Array.isArray(unreadIds)) {
-        return [];
-      }
-
-      return [...new Set(
-        unreadIds
-          .map((value) => Number(value))
-          .filter(Number.isFinite)
-      )].sort((left, right) => right - left);
-    }
-
     function areStoredPostsEquivalent(leftPosts, rightPosts) {
       if (leftPosts.length !== rightPosts.length) {
         return false;
@@ -191,16 +212,52 @@
       });
     }
 
-    async function storeRecentPosts(posts) {
+    async function getStoredRecentPosts(settings = null) {
+      const { [RECENT_POSTS_KEY]: storedPosts } = await chromeApi.storage.local.get([RECENT_POSTS_KEY]);
+      if (!Array.isArray(storedPosts)) {
+        return [];
+      }
+
+      const resolvedSettings = settings || await loadSettings();
+      const trimmedPosts = trimRecentHistoryPosts(
+        storedPosts,
+        getRecentHistoryOptions(resolvedSettings)
+      ).filter((post) => Number.isFinite(post.id) && post.title);
+
+      if (!areStoredPostsEquivalent(storedPosts, trimmedPosts)) {
+        await chromeApi.storage.local.set({ [RECENT_POSTS_KEY]: trimmedPosts });
+      }
+
+      return trimmedPosts;
+    }
+
+    async function getStoredUnreadPostIds() {
+      const { [UNREAD_POST_IDS_KEY]: unreadIds } = await chromeApi.storage.local.get([UNREAD_POST_IDS_KEY]);
+      if (!Array.isArray(unreadIds)) {
+        return [];
+      }
+
+      return [...new Set(
+        unreadIds
+          .map((value) => Number(value))
+          .filter(Number.isFinite)
+      )].sort((left, right) => right - left);
+    }
+
+    async function storeRecentPosts(posts, settings = null) {
       if (!Array.isArray(posts) || posts.length === 0) {
         return;
       }
 
-      const existingPosts = await getStoredRecentPosts();
-      const mergedPosts = mergePosts(posts, existingPosts, {
-        currentTime: now(),
-        viewUrlPrefix: DOMAIN_CONSTANTS.VIEW_URL_PREFIX
-      }).slice(0, DOMAIN_CONSTANTS.RECENT_POST_LIMIT);
+      const resolvedSettings = settings || await loadSettings();
+      const existingPosts = await getStoredRecentPosts(resolvedSettings);
+      const mergedPosts = trimRecentHistoryPosts(
+        mergePosts(posts, existingPosts, {
+          currentTime: now(),
+          viewUrlPrefix: DOMAIN_CONSTANTS.VIEW_URL_PREFIX
+        }),
+        getRecentHistoryOptions(resolvedSettings)
+      );
 
       if (areStoredPostsEquivalent(existingPosts, mergedPosts)) {
         return;
@@ -213,8 +270,7 @@
       const postById = new Map(recentPosts.map((post) => [Number(post.id), post]));
       return unreadIds
         .map((postId) => postById.get(postId))
-        .filter(Boolean)
-        .slice(0, DOMAIN_CONSTANTS.RECENT_POST_LIMIT);
+        .filter(Boolean);
     }
 
     async function reconcileUnreadPosts(recentPosts) {
@@ -236,7 +292,8 @@
     }
 
     async function buildPopupResponse({ source, fallback = false, error = null }) {
-      const recentPosts = await getStoredRecentPosts();
+      const settings = await loadSettings();
+      const recentPosts = await getStoredRecentPosts(settings);
       const { unreadIds, unreadPosts } = await reconcileUnreadPosts(recentPosts);
 
       return {
@@ -254,18 +311,19 @@
     }
 
     async function fetchPopupPostsDirectly() {
+      const settings = await loadSettings();
       const html = await fetchText(DOMAIN_CONSTANTS.MANGHO_LIST_URL);
       const livePosts = parsePostsFromHtml(html, {
         currentTime: now(),
         limit: DOMAIN_CONSTANTS.LIVE_POST_LIMIT,
         viewUrlPrefix: DOMAIN_CONSTANTS.VIEW_URL_PREFIX
       });
-      await storeRecentPosts(livePosts);
+      await storeRecentPosts(livePosts, settings);
       return buildPopupResponse({ source: 'popup-fetch' });
     }
 
-    async function getCachedPopupPosts() {
-      const storedPosts = await getStoredRecentPosts();
+    async function getCachedPopupPosts(settings = null) {
+      const storedPosts = await getStoredRecentPosts(settings);
       return filterRecentOpenPosts(storedPosts, {
         currentTime: now(),
         limit: DOMAIN_CONSTANTS.POPUP_POST_LIMIT,
@@ -277,7 +335,8 @@
       try {
         return await fetchPopupPostsDirectly();
       } catch (error) {
-        const cachedPosts = await getCachedPopupPosts();
+        const settings = await loadSettings();
+        const cachedPosts = await getCachedPopupPosts(settings);
         if (cachedPosts.length > 0) {
           const response = await buildPopupResponse({
             source: 'cache',
@@ -318,6 +377,7 @@
         target: { tabId },
         files: ['scripts/shared/seaf-overlay.js']
       });
+
       await chromeApi.scripting.executeScript({
         target: { tabId },
         func: (overlayPayload) => {
@@ -346,7 +406,7 @@
         try {
           const response = await chromeApi.tabs.sendMessage(activeTab.id, {
             type: 'SEAF_TEST_TOAST',
-            title: '테스트 오버레이입니다',
+            title: '테스트 오버레이입니다.',
             relativeTime: '방금 확인',
             toastDuration: activeSettings.toastDuration * 1000
           });
@@ -369,7 +429,7 @@
       }
 
       await injectOverlayIntoTab(activeTab.id, {
-        title: '테스트 오버레이입니다',
+        title: '테스트 오버레이입니다.',
         relativeTime: '방금 확인',
         toastDuration: activeSettings.toastDuration * 1000,
         sourceLabel: '테스트 알림',
@@ -414,11 +474,19 @@
       FIXED_POLLING_INTERVAL_SECONDS,
       MIN_TOAST_DURATION_SECONDS,
       MAX_TOAST_DURATION_SECONDS,
+      DEFAULT_RECENT_HISTORY_LIMIT,
+      MIN_RECENT_HISTORY_LIMIT,
+      MAX_RECENT_HISTORY_LIMIT,
+      DEFAULT_RECENT_HISTORY_RETENTION_MINUTES,
+      MIN_RECENT_HISTORY_RETENTION_MINUTES,
+      MAX_RECENT_HISTORY_RETENTION_MINUTES,
       RECENT_POSTS_KEY,
       UNREAD_POST_IDS_KEY,
       UNSUPPORTED_TEST_TAB_ERROR,
       LIST_PAGE_NOT_READY_ERROR,
       normalizeToastDuration,
+      normalizeRecentHistoryLimit,
+      normalizeRecentHistoryRetentionMinutes,
       normalizeSettings,
       loadSettings,
       createCheckingWorkerStatus,

@@ -5,6 +5,7 @@ const popupCore = globalThis.SEAFPopupCore.createPopupCore({
 });
 
 const HISTORY_COLLAPSED_KEY = 'seaf_popup_history_collapsed';
+const SETTINGS_COLLAPSED_KEY = 'seaf_popup_settings_collapsed';
 
 const LABELS = {
   initError: '[SEAF] popup init failed:',
@@ -34,6 +35,10 @@ const LABELS = {
   browserAlertSaved: '\uBE0C\uB77C\uC6B0\uC800 \uC54C\uB9BC \uC124\uC815\uC744 \uBC14\uAFB8\uC5C8\uC2B5\uB2C8\uB2E4.',
   toastDurationSaved: '\uC624\uBC84\uB808\uC774 \uC2DC\uAC04\uC744 \uBC14\uAFB8\uC5C8\uC2B5\uB2C8\uB2E4.',
   toastDurationClamped: '\uC624\uBC84\uB808\uC774 \uC2DC\uAC04\uC744 {seconds}\uCD08\uB85C \uC870\uC815\uD588\uC2B5\uB2C8\uB2E4.',
+  historyLimitSaved: '\uCD5C\uADFC \uAC10\uC9C0 \uAE30\uB85D \uAC1C\uC218\uB97C \uBC14\uAFB8\uC5C8\uC2B5\uB2C8\uB2E4.',
+  historyLimitClamped: '\uCD5C\uADFC \uAC10\uC9C0 \uAE30\uB85D \uAC1C\uC218\uB97C {count}\uAC1C\uB85C \uC870\uC815\uD588\uC2B5\uB2C8\uB2E4.',
+  historyRetentionSaved: '\uCD5C\uADFC \uAC10\uC9C0 \uAE30\uB85D \uBCF4\uC874 \uC2DC\uAC04\uC744 \uBC14\uAFB8\uC5C8\uC2B5\uB2C8\uB2E4.',
+  historyRetentionClamped: '\uCD5C\uADFC \uAC10\uC9C0 \uAE30\uB85D \uBCF4\uC874 \uC2DC\uAC04\uC744 {minutes}\uBD84\uC73C\uB85C \uC870\uC815\uD588\uC2B5\uB2C8\uB2E4.',
   saveWithoutBackground: '\uC124\uC815\uC740 \uC800\uC7A5\uB410\uC9C0\uB9CC \uBC31\uADF8\uB77C\uC6B4\uB4DC\uC640 \uC5F0\uACB0\uB418\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4.',
   backgroundMissing: '\uBC31\uADF8\uB77C\uC6B4\uB4DC \uC5F0\uACB0 \uC5C6\uC774 \uD31D\uC5C5\uC774 \uC9C1\uC811 \uBAA9\uB85D\uC744 \uC870\uD68C\uD588\uC2B5\uB2C8\uB2E4.',
   dashboardLoadFailed: '\uB300\uC2DC\uBCF4\uB4DC\uB97C \uBD88\uB7EC\uC624\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4.',
@@ -43,6 +48,8 @@ const LABELS = {
   noHistoryBody: '\uAC10\uC9C0\uAC00 \uD55C \uBC88\uC774\uB77C\uB3C4 \uB418\uBA74 \uCD5C\uADFC \uAE30\uB85D\uC744 \uBCF4\uC5EC\uC90D\uB2C8\uB2E4.',
   collapseHistory: '\uC811\uAE30',
   expandHistory: '\uD3BC\uCE58\uAE30',
+  collapseSettings: '\uC811\uAE30',
+  expandSettings: '\uD3BC\uCE58\uAE30',
   alertDisabled: '\uC54C\uB9BC \uAEBC\uC9D0',
   badgeOnly: '\uBC30\uC9C0 \uC911\uC2EC',
   checkingConnection: '\uC5F0\uACB0 \uD655\uC778 \uC911'
@@ -80,6 +87,8 @@ function getElements() {
     detectionToggle: document.getElementById('seaf-detection-toggle'),
     siteAlertToggle: document.getElementById('seaf-site-alert-toggle'),
     toastDurationInput: document.getElementById('seaf-toast-duration-input'),
+    historyLimitInput: document.getElementById('seaf-history-limit-input'),
+    historyRetentionInput: document.getElementById('seaf-history-retention-input'),
     pollingIntervalValue: document.getElementById('seaf-polling-interval-value'),
     workerStatusCard: document.getElementById('seaf-worker-status-card'),
     workerStatusBadge: document.getElementById('seaf-worker-status-badge'),
@@ -90,8 +99,11 @@ function getElements() {
     feedCount: document.getElementById('seaf-feed-count'),
     historyCount: document.getElementById('seaf-history-count'),
     historyToggleButton: document.getElementById('seaf-history-toggle-button'),
+    settingsToggleButton: document.getElementById('seaf-settings-toggle-button'),
+    settingsPanel: document.getElementById('seaf-settings-panel') || document.querySelector('.seaf-settings-panel'),
     feedList: document.getElementById('seaf-post-list'),
     historyList: document.getElementById('seaf-history-list'),
+    settingsBody: document.getElementById('seaf-settings-body') || document.getElementById('seaf-settings-content'),
     saveStatus: document.getElementById('seaf-save-status'),
     loadingStatus: document.getElementById('seaf-loading-status')
   };
@@ -100,11 +112,13 @@ function getElements() {
 function loadUiState() {
   try {
     return {
-      isHistoryCollapsed: localStorage.getItem(HISTORY_COLLAPSED_KEY) === 'true'
+      isHistoryCollapsed: localStorage.getItem(HISTORY_COLLAPSED_KEY) === 'true',
+      isSettingsCollapsed: localStorage.getItem(SETTINGS_COLLAPSED_KEY) === 'true'
     };
   } catch (error) {
     return {
-      isHistoryCollapsed: false
+      isHistoryCollapsed: false,
+      isSettingsCollapsed: false
     };
   }
 }
@@ -112,6 +126,7 @@ function loadUiState() {
 function persistUiState(state) {
   try {
     localStorage.setItem(HISTORY_COLLAPSED_KEY, String(Boolean(state.ui?.isHistoryCollapsed)));
+    localStorage.setItem(SETTINGS_COLLAPSED_KEY, String(Boolean(state.ui?.isSettingsCollapsed)));
   } catch (error) {
     // Ignore storage failures in popup UI state.
   }
@@ -138,6 +153,8 @@ function renderSettings(elements, settings) {
   elements.detectionToggle.checked = normalizedSettings.isDetectionActive;
   elements.siteAlertToggle.checked = normalizedSettings.isSiteAlertEnabled;
   elements.toastDurationInput.value = String(normalizedSettings.toastDuration);
+  elements.historyLimitInput.value = String(normalizedSettings.recentHistoryLimit);
+  elements.historyRetentionInput.value = String(normalizedSettings.recentHistoryRetentionMinutes);
   elements.pollingIntervalValue.textContent = `${normalizedSettings.pollingInterval}\uCD08 \uACE0\uC815`;
 }
 
@@ -157,6 +174,7 @@ function renderDashboard(elements, state) {
   elements.markAllReadButton.title = LABELS.allRead;
   elements.markAllReadButton.setAttribute('aria-label', LABELS.allRead);
   renderHistoryVisibility(elements, state);
+  renderSettingsVisibility(elements, state);
 
   renderPostList(elements.feedList, dashboard.unreadPosts, 'feed', state, elements);
   renderPostList(elements.historyList, dashboard.historyPosts, 'history', state, elements);
@@ -168,6 +186,23 @@ function renderHistoryVisibility(elements, state) {
   elements.historyToggleButton.dataset.collapsed = String(isCollapsed);
   elements.historyToggleButton.textContent = isCollapsed ? LABELS.expandHistory : LABELS.collapseHistory;
   elements.historyToggleButton.setAttribute('aria-expanded', String(!isCollapsed));
+}
+
+function renderSettingsVisibility(elements, state) {
+  const isCollapsed = Boolean(state.ui?.isSettingsCollapsed);
+  if (!elements.settingsBody || !elements.settingsToggleButton) {
+    return;
+  }
+
+  elements.settingsBody.hidden = isCollapsed;
+  if (elements.settingsPanel) {
+    elements.settingsPanel.dataset.collapsed = String(isCollapsed);
+  }
+  elements.settingsToggleButton.dataset.collapsed = String(isCollapsed);
+  elements.settingsToggleButton.textContent = isCollapsed
+    ? LABELS.expandSettings
+    : LABELS.collapseSettings;
+  elements.settingsToggleButton.setAttribute('aria-expanded', String(!isCollapsed));
 }
 
 function renderPostList(container, posts, kind, state, elements) {
@@ -319,6 +354,40 @@ function wireInteractions(elements, state) {
     await saveSettings(state, elements, message);
   });
 
+  elements.historyLimitInput.addEventListener('change', async (event) => {
+    const rawValue = event.target.value;
+    const normalizedHistoryLimit = popupCore.normalizeRecentHistoryLimit(rawValue);
+    state.settings = {
+      ...state.settings,
+      recentHistoryLimit: normalizedHistoryLimit
+    };
+
+    renderSettings(elements, state.settings);
+
+    const message = String(rawValue).trim() !== String(normalizedHistoryLimit)
+      ? LABELS.historyLimitClamped.replace('{count}', String(normalizedHistoryLimit))
+      : LABELS.historyLimitSaved;
+
+    await saveSettings(state, elements, message);
+  });
+
+  elements.historyRetentionInput.addEventListener('change', async (event) => {
+    const rawValue = event.target.value;
+    const normalizedRetentionMinutes = popupCore.normalizeRecentHistoryRetentionMinutes(rawValue);
+    state.settings = {
+      ...state.settings,
+      recentHistoryRetentionMinutes: normalizedRetentionMinutes
+    };
+
+    renderSettings(elements, state.settings);
+
+    const message = String(rawValue).trim() !== String(normalizedRetentionMinutes)
+      ? LABELS.historyRetentionClamped.replace('{minutes}', String(normalizedRetentionMinutes))
+      : LABELS.historyRetentionSaved;
+
+    await saveSettings(state, elements, message);
+  });
+
   elements.refreshButton.addEventListener('click', async () => {
     await refreshDashboard(state, elements, true);
   });
@@ -331,6 +400,12 @@ function wireInteractions(elements, state) {
     state.ui.isHistoryCollapsed = !state.ui.isHistoryCollapsed;
     persistUiState(state);
     renderHistoryVisibility(elements, state);
+  });
+
+  elements.settingsToggleButton.addEventListener('click', () => {
+    state.ui.isSettingsCollapsed = !state.ui.isSettingsCollapsed;
+    persistUiState(state);
+    renderSettingsVisibility(elements, state);
   });
 
   elements.openGalleryButton.addEventListener('click', async () => {
@@ -362,6 +437,7 @@ async function saveSettings(state, elements, message) {
     }
 
     showTransientStatus(elements.saveStatus, message || LABELS.settingsSaved);
+    await refreshDashboard(state, elements, false);
   } catch (error) {
     if (!popupCore.isMissingReceiverError(error)) {
       throw error;
@@ -371,6 +447,7 @@ async function saveSettings(state, elements, message) {
     state.dashboard.alertModeLabel = describeAlertMode(state.settings, state.dashboard.worker);
     renderDashboard(elements, state);
     showTransientStatus(elements.saveStatus, LABELS.saveWithoutBackground);
+    await refreshDashboard(state, elements, false);
   }
 }
 
