@@ -42,18 +42,22 @@ test('normalizeSettings keeps polling fixed and clamps toast/history settings', 
     pollingInterval: 5,
     toastDuration: 99,
     recentHistoryLimit: 99,
-    recentHistoryRetentionMinutes: 1
+    recentHistoryRetentionMinutes: 1,
+    unreadActiveWindowMinutes: 999
   }), {
     isDetectionActive: true,
     pollingInterval: 30,
     toastDuration: 30,
     isSiteAlertEnabled: true,
     recentHistoryLimit: 30,
-    recentHistoryRetentionMinutes: 5
+    recentHistoryRetentionMinutes: 5,
+    unreadActiveWindowMinutes: 180
   });
   assert.equal(core.normalizeToastDuration(1), 3);
   assert.equal(core.normalizeRecentHistoryLimit(0), 1);
   assert.equal(core.normalizeRecentHistoryRetentionMinutes(999), 180);
+  assert.equal(core.normalizeSettings({}).unreadActiveWindowMinutes, 15);
+  assert.equal(core.normalizeSettings({ unreadActiveWindowMinutes: 0 }).unreadActiveWindowMinutes, 1);
 });
 
 test('getStoredRecentPosts trims stored history by count and age and persists the trimmed cache', async () => {
@@ -194,6 +198,51 @@ test('fetchPopupPostsWithFallback decodes numeric entities in cached titles', as
   assert.equal(response.success, true);
   assert.equal(response.source, 'cache');
   assert.equal(response.unreadPosts[0].title, '\u267f\u267f\u267f \uC77C\uC7A5\uC5F0 10 \u267f\u267f\u267f');
+});
+
+test('reconcileUnreadPosts keeps older retained posts in history but removes them from unread after unreadActiveWindowMinutes', async () => {
+  const { core, fake } = createCore({
+    chromeOptions: {
+      storageData: {
+        seaf_settings: {
+          recentHistoryLimit: 15,
+          recentHistoryRetentionMinutes: 30,
+          unreadActiveWindowMinutes: 15
+        },
+        seaf_recent_posts: [
+          {
+            id: 64,
+            title: 'still unread',
+            subject: '\uD5EC\uB9DD\uD638',
+            fullDateStr: '',
+            postUrl: 'https://example.com/64',
+            detectedAt: NOW - (8 * 60 * 1000)
+          },
+          {
+            id: 63,
+            title: 'history only',
+            subject: '\uD5EC\uB9DD\uD638',
+            fullDateStr: '',
+            postUrl: 'https://example.com/63',
+            detectedAt: NOW - (20 * 60 * 1000)
+          }
+        ],
+        seaf_unread_post_ids: [64, 63]
+      }
+    }
+  });
+
+  const settings = core.normalizeSettings({
+    recentHistoryLimit: 15,
+    recentHistoryRetentionMinutes: 30,
+    unreadActiveWindowMinutes: 15
+  });
+  const historyPosts = await core.getStoredRecentPosts(settings);
+  const response = await core.reconcileUnreadPosts(historyPosts);
+
+  assert.deepEqual(historyPosts.map((post) => post.id), [64, 63]);
+  assert.deepEqual(response.unreadPosts.map((post) => post.id), [64]);
+  assert.deepEqual(fake.state.storageData.seaf_unread_post_ids, [64]);
 });
 
 test('areStoredPostsEquivalent ignores detectedAt-only changes', () => {

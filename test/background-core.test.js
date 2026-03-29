@@ -61,7 +61,8 @@ test('normalizeSettings applies fixed polling, clamps toast duration, and upgrad
     pollingInterval: 5,
     toastDuration: 6,
     recentHistoryLimit: 99,
-    recentHistoryRetentionMinutes: 1
+    recentHistoryRetentionMinutes: 1,
+    unreadActiveWindowMinutes: 999
   });
 
   assert.equal(normalized.isDetectionActive, false);
@@ -70,10 +71,13 @@ test('normalizeSettings applies fixed polling, clamps toast duration, and upgrad
   assert.equal(normalized.toastDuration, 10);
   assert.equal(normalized.recentHistoryLimit, 30);
   assert.equal(normalized.recentHistoryRetentionMinutes, 5);
+  assert.equal(normalized.unreadActiveWindowMinutes, 180);
   assert.equal(core.normalizeSettings({ toastDuration: 99 }).toastDuration, 30);
   assert.equal(core.normalizeSettings({ toastDuration: 1 }).toastDuration, 3);
   assert.equal(core.normalizeSettings({}).recentHistoryLimit, 15);
   assert.equal(core.normalizeSettings({}).recentHistoryRetentionMinutes, 30);
+  assert.equal(core.normalizeSettings({}).unreadActiveWindowMinutes, 15);
+  assert.equal(core.normalizeSettings({ unreadActiveWindowMinutes: 0 }).unreadActiveWindowMinutes, 1);
 });
 
 test('setupAlarm always creates a fixed 30 second interval', async () => {
@@ -218,6 +222,39 @@ test('getRecentPosts trims stored history by count and age and persists the trim
   assert.deepEqual(fake.state.storageData.seaf_recent_posts.map((post) => post.id), [31, 30]);
 });
 
+test('storeRecentPosts preserves the original detectedAt when the same post is fetched again', async () => {
+  const initialDetectedAt = NOW - (2 * 60 * 1000);
+  const { core, fake } = createCore({
+    chromeOptions: {
+      storageData: {
+        seaf_recent_posts: [
+          {
+            id: 41,
+            title: 'existing unread',
+            subject: '\uD5EC\uB9DD\uD638',
+            fullDateStr: '',
+            postUrl: 'https://example.com/41',
+            detectedAt: initialDetectedAt
+          }
+        ]
+      }
+    }
+  });
+
+  await core.storeRecentPosts([
+    {
+      id: 41,
+      title: 'existing unread',
+      subject: '\uD5EC\uB9DD\uD638',
+      fullDateStr: '',
+      postUrl: 'https://example.com/41',
+      detectedAt: NOW
+    }
+  ], core.normalizeSettings({}));
+
+  assert.equal(fake.state.storageData.seaf_recent_posts[0].detectedAt, initialDetectedAt);
+});
+
 test('syncBadge reconciles stale unread ids against recent cached posts', async () => {
   const recentPosts = domain.parsePostsFromHtml(
     buildListHtml([{ id: 61, title: 'visible unread', fullDateStr: '2026-03-09 10:04:00' }]),
@@ -240,6 +277,84 @@ test('syncBadge reconciles stale unread ids against recent cached posts', async 
 
   assert.deepEqual(fake.state.storageData.seaf_unread_post_ids, [61]);
   assert.equal(fake.state.badgeTexts.at(-1).text, '1');
+});
+
+test('syncBadge prunes unread ids that exceed unreadActiveWindowMinutes while history remains retained', async () => {
+  const { core, fake } = createCore({
+    chromeOptions: {
+      storageData: {
+        seaf_settings: {
+          recentHistoryLimit: 15,
+          recentHistoryRetentionMinutes: 30,
+          unreadActiveWindowMinutes: 15
+        },
+        seaf_recent_posts: [
+          {
+            id: 91,
+            title: 'still unread',
+            subject: '\uD5EC\uB9DD\uD638',
+            fullDateStr: '',
+            postUrl: 'https://example.com/91',
+            detectedAt: NOW - (10 * 60 * 1000)
+          },
+          {
+            id: 90,
+            title: 'history only',
+            subject: '\uD5EC\uB9DD\uD638',
+            fullDateStr: '',
+            postUrl: 'https://example.com/90',
+            detectedAt: NOW - (20 * 60 * 1000)
+          }
+        ],
+        seaf_unread_post_ids: [91, 90]
+      }
+    }
+  });
+
+  await core.syncBadge(core.normalizeSettings({
+    recentHistoryLimit: 15,
+    recentHistoryRetentionMinutes: 30,
+    unreadActiveWindowMinutes: 15
+  }));
+
+  assert.deepEqual(fake.state.storageData.seaf_recent_posts.map((post) => post.id), [91, 90]);
+  assert.deepEqual(fake.state.storageData.seaf_unread_post_ids, [91]);
+  assert.equal(fake.state.badgeTexts.at(-1).text, '1');
+});
+
+test('syncBadge lets recent-history retention win when it is shorter than unreadActiveWindowMinutes', async () => {
+  const { core, fake } = createCore({
+    chromeOptions: {
+      storageData: {
+        seaf_settings: {
+          recentHistoryLimit: 15,
+          recentHistoryRetentionMinutes: 10,
+          unreadActiveWindowMinutes: 15
+        },
+        seaf_recent_posts: [
+          {
+            id: 95,
+            title: 'expired from history first',
+            subject: '\uD5EC\uB9DD\uD638',
+            fullDateStr: '',
+            postUrl: 'https://example.com/95',
+            detectedAt: NOW - (12 * 60 * 1000)
+          }
+        ],
+        seaf_unread_post_ids: [95]
+      }
+    }
+  });
+
+  await core.syncBadge(core.normalizeSettings({
+    recentHistoryLimit: 15,
+    recentHistoryRetentionMinutes: 10,
+    unreadActiveWindowMinutes: 15
+  }));
+
+  assert.deepEqual(fake.state.storageData.seaf_recent_posts, []);
+  assert.deepEqual(fake.state.storageData.seaf_unread_post_ids, []);
+  assert.equal(fake.state.badgeTexts.at(-1).text, '');
 });
 
 test('syncBadge prunes unread ids that fall outside retained recent history', async () => {

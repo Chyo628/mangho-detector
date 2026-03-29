@@ -196,6 +196,32 @@ test('trimRecentHistoryPosts respects explicit count and age settings', () => {
   assert.deepEqual(trimmed.map((post) => post.id), [51, 50]);
 });
 
+test('isUnreadPostActive uses a 15 minute default window and respects overrides', () => {
+  const currentTime = Date.parse('2026-03-09T01:30:00Z');
+
+  assert.equal(
+    domain.isUnreadPostActive(
+      { detectedAt: currentTime - (15 * 60 * 1000) },
+      { currentTime }
+    ),
+    true
+  );
+  assert.equal(
+    domain.isUnreadPostActive(
+      { detectedAt: currentTime - (15 * 60 * 1000) - 1 },
+      { currentTime }
+    ),
+    false
+  );
+  assert.equal(
+    domain.isUnreadPostActive(
+      { detectedAt: currentTime - (6 * 60 * 1000) },
+      { currentTime, maxAgeMs: 5 * 60 * 1000 }
+    ),
+    false
+  );
+});
+
 test('filterRecentOpenPosts excludes closed and stale posts', () => {
   const currentTime = Date.parse('2026-03-09T01:05:00Z');
   const posts = [
@@ -230,16 +256,16 @@ test('filterRecentOpenPosts excludes closed and stale posts', () => {
   assert.deepEqual(filtered.map((post) => post.id), [11]);
 });
 
-test('mergePosts merges duplicates and keeps the latest detection timestamp', () => {
+test('mergePosts merges duplicates, preserves first-seen detection time, and keeps fresher fields', () => {
   const merged = domain.mergePosts(
     [
       {
         id: 1,
-        title: 'first',
+        title: 'first-live',
         subject: domain.constants.MANGHO_SUBJECTS[0],
         fullDateStr: '',
         postUrl: 'https://example.com/1',
-        detectedAt: 100
+        detectedAt: 300
       }
     ],
     [
@@ -253,11 +279,11 @@ test('mergePosts merges duplicates and keeps the latest detection timestamp', ()
       },
       {
         id: 1,
-        title: 'first-updated',
+        title: 'first-cached',
         subject: domain.constants.MANGHO_SUBJECTS[0],
         fullDateStr: '',
         postUrl: 'https://example.com/1',
-        detectedAt: 300
+        detectedAt: 100
       }
     ],
     {
@@ -267,7 +293,8 @@ test('mergePosts merges duplicates and keeps the latest detection timestamp', ()
   );
 
   assert.deepEqual(merged.map((post) => post.id), [2, 1]);
-  assert.equal(merged.find((post) => post.id === 1).detectedAt, 300);
+  assert.equal(merged.find((post) => post.id === 1).detectedAt, 100);
+  assert.equal(merged.find((post) => post.id === 1).title, 'first-live');
 });
 
 test('extractLobbyLinkFromHtml returns a steam lobby link when present', () => {

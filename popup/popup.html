@@ -145,7 +145,7 @@
           <label class="seaf-setting-row" for="seaf-site-alert-toggle">
             <span class="seaf-setting-copy">
               <span class="seaf-setting-label">브라우저 알림</span>
-              <span class="seaf-setting-hint">탭 오버레이와 배지 알림을 함께 제어합니다.</span>
+              <span class="seaf-setting-hint">오버레이와 배지 알림을 함께 제어합니다.</span>
             </span>
             <span class="seaf-toggle">
               <input type="checkbox" id="seaf-site-alert-toggle">
@@ -202,7 +202,7 @@
           <label class="seaf-setting-row" for="seaf-history-retention-input">
             <span class="seaf-setting-copy">
               <span class="seaf-setting-label">최근 감지 기록 보존 시간</span>
-              <span class="seaf-setting-hint">감지 후 최대 180분까지 기록을 유지합니다.</span>
+              <span class="seaf-setting-hint">감지 후 최대 180분까지 기록으로 유지합니다.</span>
             </span>
             <span class="seaf-number-input-wrap">
               <input
@@ -211,6 +211,25 @@
                 class="seaf-number-input"
                 inputmode="numeric"
                 min="5"
+                max="180"
+                step="1"
+              >
+              <span class="seaf-input-suffix">분</span>
+            </span>
+          </label>
+
+          <label class="seaf-setting-row" for="seaf-unread-window-input">
+            <span class="seaf-setting-copy">
+              <span class="seaf-setting-label">읽지 않은 모집 유지 시간</span>
+              <span class="seaf-setting-hint">감지 후 최대 180분까지 읽지 않은 상태로 유지합니다.</span>
+            </span>
+            <span class="seaf-number-input-wrap">
+              <input
+                type="number"
+                id="seaf-unread-window-input"
+                class="seaf-number-input"
+                inputmode="numeric"
+                min="1"
                 max="180"
                 step="1"
               >
