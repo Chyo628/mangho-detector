@@ -39,6 +39,8 @@ const LABELS = {
   historyLimitClamped: '\uCD5C\uADFC \uAC10\uC9C0 \uAE30\uB85D \uAC1C\uC218\uB97C {count}\uAC1C\uB85C \uC870\uC815\uD588\uC2B5\uB2C8\uB2E4.',
   historyRetentionSaved: '\uCD5C\uADFC \uAC10\uC9C0 \uAE30\uB85D \uBCF4\uC874 \uC2DC\uAC04\uC744 \uBC14\uAFB8\uC5C8\uC2B5\uB2C8\uB2E4.',
   historyRetentionClamped: '\uCD5C\uADFC \uAC10\uC9C0 \uAE30\uB85D \uBCF4\uC874 \uC2DC\uAC04\uC744 {minutes}\uBD84\uC73C\uB85C \uC870\uC815\uD588\uC2B5\uB2C8\uB2E4.',
+  unreadWindowSaved: '\uC77D\uC9C0 \uC54A\uC740 \uBAA8\uC9D1 \uC720\uC9C0 \uC2DC\uAC04\uC744 \uBC14\uAFB8\uC5C8\uC2B5\uB2C8\uB2E4.',
+  unreadWindowClamped: '\uC77D\uC9C0 \uC54A\uC740 \uBAA8\uC9D1 \uC720\uC9C0 \uC2DC\uAC04\uC744 {minutes}\uBD84\uC73C\uB85C \uC870\uC815\uD588\uC2B5\uB2C8\uB2E4.',
   saveWithoutBackground: '\uC124\uC815\uC740 \uC800\uC7A5\uB410\uC9C0\uB9CC \uBC31\uADF8\uB77C\uC6B4\uB4DC\uC640 \uC5F0\uACB0\uB418\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4.',
   backgroundMissing: '\uBC31\uADF8\uB77C\uC6B4\uB4DC \uC5F0\uACB0 \uC5C6\uC774 \uD31D\uC5C5\uC774 \uC9C1\uC811 \uBAA9\uB85D\uC744 \uC870\uD68C\uD588\uC2B5\uB2C8\uB2E4.',
   dashboardLoadFailed: '\uB300\uC2DC\uBCF4\uB4DC\uB97C \uBD88\uB7EC\uC624\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4.',
@@ -89,6 +91,7 @@ function getElements() {
     toastDurationInput: document.getElementById('seaf-toast-duration-input'),
     historyLimitInput: document.getElementById('seaf-history-limit-input'),
     historyRetentionInput: document.getElementById('seaf-history-retention-input'),
+    unreadActiveWindowInput: document.getElementById('seaf-unread-window-input'),
     pollingIntervalValue: document.getElementById('seaf-polling-interval-value'),
     workerStatusCard: document.getElementById('seaf-worker-status-card'),
     workerStatusBadge: document.getElementById('seaf-worker-status-badge'),
@@ -155,6 +158,7 @@ function renderSettings(elements, settings) {
   elements.toastDurationInput.value = String(normalizedSettings.toastDuration);
   elements.historyLimitInput.value = String(normalizedSettings.recentHistoryLimit);
   elements.historyRetentionInput.value = String(normalizedSettings.recentHistoryRetentionMinutes);
+  elements.unreadActiveWindowInput.value = String(normalizedSettings.unreadActiveWindowMinutes);
   elements.pollingIntervalValue.textContent = `${normalizedSettings.pollingInterval}\uCD08 \uACE0\uC815`;
 }
 
@@ -384,6 +388,23 @@ function wireInteractions(elements, state) {
     const message = String(rawValue).trim() !== String(normalizedRetentionMinutes)
       ? LABELS.historyRetentionClamped.replace('{minutes}', String(normalizedRetentionMinutes))
       : LABELS.historyRetentionSaved;
+
+    await saveSettings(state, elements, message);
+  });
+
+  elements.unreadActiveWindowInput.addEventListener('change', async (event) => {
+    const rawValue = event.target.value;
+    const normalizedUnreadWindow = popupCore.normalizeUnreadActiveWindowMinutes(rawValue);
+    state.settings = {
+      ...state.settings,
+      unreadActiveWindowMinutes: normalizedUnreadWindow
+    };
+
+    renderSettings(elements, state.settings);
+
+    const message = String(rawValue).trim() !== String(normalizedUnreadWindow)
+      ? LABELS.unreadWindowClamped.replace('{minutes}', String(normalizedUnreadWindow))
+      : LABELS.unreadWindowSaved;
 
     await saveSettings(state, elements, message);
   });

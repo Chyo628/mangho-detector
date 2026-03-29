@@ -17,6 +17,9 @@
   const DEFAULT_RECENT_HISTORY_RETENTION_MINUTES = 30;
   const MIN_RECENT_HISTORY_RETENTION_MINUTES = 5;
   const MAX_RECENT_HISTORY_RETENTION_MINUTES = 180;
+  const DEFAULT_UNREAD_ACTIVE_WINDOW_MINUTES = 15;
+  const MIN_UNREAD_ACTIVE_WINDOW_MINUTES = 1;
+  const MAX_UNREAD_ACTIVE_WINDOW_MINUTES = 180;
   const JOIN_HELPER_PATH = 'helper/join.html';
   const UNSUPPORTED_TEST_TAB_ERROR = '현재 탭에서는 오버레이 테스트를 실행할 수 없습니다.';
   const LIST_PAGE_NOT_READY_ERROR = '목록 페이지가 아직 준비되지 않았습니다.';
@@ -29,7 +32,8 @@
     toastDuration: DEFAULT_TOAST_DURATION_SECONDS,
     isSiteAlertEnabled: true,
     recentHistoryLimit: DEFAULT_RECENT_HISTORY_LIMIT,
-    recentHistoryRetentionMinutes: DEFAULT_RECENT_HISTORY_RETENTION_MINUTES
+    recentHistoryRetentionMinutes: DEFAULT_RECENT_HISTORY_RETENTION_MINUTES,
+    unreadActiveWindowMinutes: DEFAULT_UNREAD_ACTIVE_WINDOW_MINUTES
   };
 
   function createBackgroundCore({
@@ -46,6 +50,7 @@
       refreshRelativeTimes,
       mergePosts,
       trimRecentHistoryPosts,
+      isUnreadPostActive,
       extractLobbyLinkFromHtml,
       isHelldiversListUrl
     } = domain;
@@ -89,6 +94,18 @@
       );
     }
 
+    function clampUnreadActiveWindowMinutes(value) {
+      const numericValue = Number(value);
+      if (!Number.isFinite(numericValue)) {
+        return DEFAULT_UNREAD_ACTIVE_WINDOW_MINUTES;
+      }
+
+      return Math.min(
+        MAX_UNREAD_ACTIVE_WINDOW_MINUTES,
+        Math.max(MIN_UNREAD_ACTIVE_WINDOW_MINUTES, Math.round(numericValue))
+      );
+    }
+
     function normalizeSettings(savedSettings) {
       const normalizedSettings = {
         ...DEFAULT_SETTINGS,
@@ -112,6 +129,9 @@
       );
       normalizedSettings.recentHistoryRetentionMinutes = clampRecentHistoryRetentionMinutes(
         normalizedSettings.recentHistoryRetentionMinutes
+      );
+      normalizedSettings.unreadActiveWindowMinutes = clampUnreadActiveWindowMinutes(
+        normalizedSettings.unreadActiveWindowMinutes
       );
 
       return normalizedSettings;
@@ -253,7 +273,7 @@
 
       const resolvedSettings = settings || await ensureSettings();
       const recentPosts = await getRecentPosts(resolvedSettings);
-      const { unreadIds } = await reconcileUnreadPosts(recentPosts);
+      const { unreadIds } = await reconcileUnreadPosts(recentPosts, resolvedSettings);
       const shouldShowBadge = resolvedSettings.isSiteAlertEnabled && unreadIds.length > 0;
       const badgeText = shouldShowBadge
         ? String(Math.min(unreadIds.length, MAX_BADGE_COUNT))
@@ -519,17 +539,26 @@
       }
     }
 
-    function hydrateUnreadPosts(recentPosts, unreadIds) {
+    function getUnreadHistoryOptions(settings, currentTime = now()) {
+      const resolvedSettings = normalizeSettings(settings);
+      return {
+        currentTime,
+        maxAgeMs: resolvedSettings.unreadActiveWindowMinutes * 60 * 1000
+      };
+    }
+
+    function hydrateUnreadPosts(recentPosts, unreadIds, settings = null) {
+      const unreadHistoryOptions = getUnreadHistoryOptions(settings);
       const postById = new Map(recentPosts.map((post) => [Number(post.id), post]));
       return unreadIds
         .map((postId) => postById.get(postId))
-        .filter(Boolean)
+        .filter((post) => post && isUnreadPostActive(post, unreadHistoryOptions))
         .slice(0, recentPosts.length);
     }
 
-    async function reconcileUnreadPosts(recentPosts) {
+    async function reconcileUnreadPosts(recentPosts, settings = null) {
       const unreadIds = await getUnreadPostIds();
-      const unreadPosts = hydrateUnreadPosts(recentPosts, unreadIds);
+      const unreadPosts = hydrateUnreadPosts(recentPosts, unreadIds, settings);
       const visibleUnreadIds = unreadPosts.map((post) => Number(post.id)).filter(Number.isFinite);
 
       if (
@@ -548,7 +577,7 @@
     async function buildPopupPayload({ source, fallback = false, error = null }) {
       const settings = await ensureSettings();
       const recentPosts = await getRecentPosts(settings);
-      const { unreadIds, unreadPosts } = await reconcileUnreadPosts(recentPosts);
+      const { unreadIds, unreadPosts } = await reconcileUnreadPosts(recentPosts, settings);
       const lastScanAt = await getLastScanAt();
       const surfaceState = await getLastSurfaceState();
 
@@ -873,6 +902,9 @@
       DEFAULT_RECENT_HISTORY_RETENTION_MINUTES,
       MIN_RECENT_HISTORY_RETENTION_MINUTES,
       MAX_RECENT_HISTORY_RETENTION_MINUTES,
+      DEFAULT_UNREAD_ACTIVE_WINDOW_MINUTES,
+      MIN_UNREAD_ACTIVE_WINDOW_MINUTES,
+      MAX_UNREAD_ACTIVE_WINDOW_MINUTES,
       LAST_SEEN_KEY,
       RECENT_POSTS_KEY,
       SETTINGS_KEY,
@@ -886,6 +918,7 @@
       clampToastDuration,
       clampRecentHistoryLimit,
       clampRecentHistoryRetentionMinutes,
+      clampUnreadActiveWindowMinutes,
       normalizeSettings,
       ensureSettings,
       handleStorageChanged,
@@ -903,6 +936,7 @@
       areStoredPostsEquivalent,
       storeRecentPosts,
       getPopupPosts,
+      getUnreadHistoryOptions,
       hydrateUnreadPosts,
       reconcileUnreadPosts,
       performDetection,

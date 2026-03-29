@@ -13,7 +13,7 @@ function loadFreshPopupModule() {
   return require('../popup/popup.js');
 }
 
-function setupPopupTest({ storageData = {}, beforeLoad = null } = {}) {
+function setupPopupTest({ storageData = {}, beforeLoad = null, livePostsResponse = null } = {}) {
   const domHandle = installDom(loadHtml('popup/popup.html'), 'https://example.com/popup.html');
 
   if (typeof beforeLoad === 'function') {
@@ -25,7 +25,7 @@ function setupPopupTest({ storageData = {}, beforeLoad = null } = {}) {
     manifest: { version: '1.2.3' },
     runtimeSendMessage(message, state) {
       if (message.type === 'GET_LIVE_POSTS') {
-        return {
+        return livePostsResponse || {
           success: true,
           unreadPosts: [
             {
@@ -107,7 +107,8 @@ test('popup renders summary, unread feed, and saved settings', async () => {
         toastDuration: 12,
         isSiteAlertEnabled: false,
         recentHistoryLimit: 18,
-        recentHistoryRetentionMinutes: 45
+        recentHistoryRetentionMinutes: 45,
+        unreadActiveWindowMinutes: 20
       }
     }
   });
@@ -121,6 +122,7 @@ test('popup renders summary, unread feed, and saved settings', async () => {
     assert.equal(document.getElementById('seaf-toast-duration-input').value, '12');
     assert.equal(document.getElementById('seaf-history-limit-input').value, '18');
     assert.equal(document.getElementById('seaf-history-retention-input').value, '45');
+    assert.equal(document.getElementById('seaf-unread-window-input').value, '20');
     assert.equal(document.getElementById('seaf-site-alert-toggle').checked, false);
     assert.equal(document.getElementById('seaf-feed-count').textContent, '1');
     assert.equal(document.querySelector('.seaf-post-title').textContent, '테스트 모집');
@@ -138,7 +140,8 @@ test('popup clamps toast duration on save before persisting settings', async () 
         toastDuration: 10,
         isSiteAlertEnabled: true,
         recentHistoryLimit: 15,
-        recentHistoryRetentionMinutes: 30
+        recentHistoryRetentionMinutes: 30,
+        unreadActiveWindowMinutes: 15
       }
     }
   });
@@ -175,7 +178,8 @@ test('popup clamps recent history settings on save before persisting settings', 
         toastDuration: 10,
         isSiteAlertEnabled: true,
         recentHistoryLimit: 15,
-        recentHistoryRetentionMinutes: 30
+        recentHistoryRetentionMinutes: 30,
+        unreadActiveWindowMinutes: 15
       }
     }
   });
@@ -204,6 +208,44 @@ test('popup clamps recent history settings on save before persisting settings', 
   }
 });
 
+test('popup clamps unread active window on save before persisting settings', async () => {
+  const handle = setupPopupTest({
+    storageData: {
+      seaf_settings: {
+        isDetectionActive: true,
+        pollingInterval: 30,
+        toastDuration: 10,
+        isSiteAlertEnabled: true,
+        recentHistoryLimit: 15,
+        recentHistoryRetentionMinutes: 30,
+        unreadActiveWindowMinutes: 15
+      }
+    }
+  });
+
+  try {
+    await handle.settle();
+
+    const unreadWindowInput = document.getElementById('seaf-unread-window-input');
+
+    unreadWindowInput.value = '999';
+    unreadWindowInput.dispatchEvent(new window.Event('change', { bubbles: true }));
+    await handle.settle();
+
+    assert.equal(handle.fake.state.storageData.seaf_settings.unreadActiveWindowMinutes, 180);
+    assert.equal(unreadWindowInput.value, '180');
+
+    unreadWindowInput.value = '0';
+    unreadWindowInput.dispatchEvent(new window.Event('change', { bubbles: true }));
+    await handle.settle();
+
+    assert.equal(handle.fake.state.storageData.seaf_settings.unreadActiveWindowMinutes, 1);
+    assert.equal(unreadWindowInput.value, '1');
+  } finally {
+    handle.cleanup();
+  }
+});
+
 test('popup persists settings panel collapsed state', async () => {
   const handle = setupPopupTest({
     storageData: {
@@ -213,7 +255,8 @@ test('popup persists settings panel collapsed state', async () => {
         toastDuration: 10,
         isSiteAlertEnabled: true,
         recentHistoryLimit: 15,
-        recentHistoryRetentionMinutes: 30
+        recentHistoryRetentionMinutes: 30,
+        unreadActiveWindowMinutes: 15
       }
     }
   });
@@ -266,6 +309,60 @@ test('popup preserves existing history collapse behavior', async () => {
 
     assert.equal(document.getElementById('seaf-history-list').hidden, true);
     assert.equal(document.getElementById('seaf-history-toggle-button').textContent, '펼치기');
+  } finally {
+    handle.cleanup();
+  }
+});
+
+test('popup renders zero unread while retained history still remains visible', async () => {
+  const handle = setupPopupTest({
+    storageData: {
+      seaf_settings: {
+        isDetectionActive: true,
+        pollingInterval: 30,
+        toastDuration: 10,
+        isSiteAlertEnabled: true,
+        recentHistoryLimit: 15,
+        recentHistoryRetentionMinutes: 30,
+        unreadActiveWindowMinutes: 15
+      }
+    },
+    livePostsResponse: {
+      success: true,
+      unreadPosts: [],
+      historyPosts: [
+        {
+          id: 101,
+          title: '\uD788\uC2A4\uD1A0\uB9AC\uB9CC \uB0A8\uC740 \uBAA8\uC9D1',
+          relativeTime: '\uBC29\uAE08',
+          subject: '\uD5EC\uB9DD\uD638',
+          postUrl: 'https://gall.dcinside.com/mgallery/board/view/?id=helldiversseries&no=101'
+        }
+      ],
+      unreadCount: 0,
+      lastScanAt: Date.now(),
+      source: 'fetch',
+      worker: {
+        mode: 'normal',
+        message: '\uBE0C\uB77C\uC6B0\uC800 \uC624\uBC84\uB808\uC774\uC640 \uBC30\uC9C0\uAC00 \uC815\uC0C1 \uB3D9\uC791 \uC911\uC785\uB2C8\uB2E4.'
+      }
+    }
+  });
+
+  try {
+    await handle.settle();
+
+    assert.equal(document.getElementById('seaf-unread-count').textContent, '0');
+    assert.equal(document.getElementById('seaf-feed-count').textContent, '0');
+    assert.equal(document.getElementById('seaf-history-count').textContent, '1');
+    assert.equal(
+      document.getElementById('seaf-post-list').textContent.includes('\uC9C0\uAE08 \uCC98\uB9AC\uD560 \uBAA8\uC9D1\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.'),
+      true
+    );
+    assert.equal(
+      document.getElementById('seaf-history-list').textContent.includes('\uD788\uC2A4\uD1A0\uB9AC\uB9CC \uB0A8\uC740 \uBAA8\uC9D1'),
+      true
+    );
   } finally {
     handle.cleanup();
   }

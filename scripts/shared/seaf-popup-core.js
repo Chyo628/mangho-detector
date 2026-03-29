@@ -9,13 +9,17 @@
   const DEFAULT_RECENT_HISTORY_RETENTION_MINUTES = 30;
   const MIN_RECENT_HISTORY_RETENTION_MINUTES = 5;
   const MAX_RECENT_HISTORY_RETENTION_MINUTES = 180;
+  const DEFAULT_UNREAD_ACTIVE_WINDOW_MINUTES = 15;
+  const MIN_UNREAD_ACTIVE_WINDOW_MINUTES = 1;
+  const MAX_UNREAD_ACTIVE_WINDOW_MINUTES = 180;
   const DEFAULT_SETTINGS = {
     isDetectionActive: true,
     pollingInterval: FIXED_POLLING_INTERVAL_SECONDS,
     toastDuration: DEFAULT_TOAST_DURATION_SECONDS,
     isSiteAlertEnabled: true,
     recentHistoryLimit: DEFAULT_RECENT_HISTORY_LIMIT,
-    recentHistoryRetentionMinutes: DEFAULT_RECENT_HISTORY_RETENTION_MINUTES
+    recentHistoryRetentionMinutes: DEFAULT_RECENT_HISTORY_RETENTION_MINUTES,
+    unreadActiveWindowMinutes: DEFAULT_UNREAD_ACTIVE_WINDOW_MINUTES
   };
   const RECENT_POSTS_KEY = 'seaf_recent_posts';
   const UNREAD_POST_IDS_KEY = 'seaf_unread_post_ids';
@@ -35,6 +39,7 @@
       extractLobbyLinkFromHtml,
       mergePosts,
       trimRecentHistoryPosts,
+      isUnreadPostActive,
       isHelldiversListUrl
     } = domain;
 
@@ -74,6 +79,18 @@
       );
     }
 
+    function normalizeUnreadActiveWindowMinutes(value) {
+      const numericValue = Number(value);
+      if (!Number.isFinite(numericValue)) {
+        return DEFAULT_UNREAD_ACTIVE_WINDOW_MINUTES;
+      }
+
+      return Math.min(
+        MAX_UNREAD_ACTIVE_WINDOW_MINUTES,
+        Math.max(MIN_UNREAD_ACTIVE_WINDOW_MINUTES, Math.round(numericValue))
+      );
+    }
+
     function normalizeSettings(savedSettings) {
       const normalizedSettings = {
         ...DEFAULT_SETTINGS,
@@ -89,6 +106,9 @@
       );
       normalizedSettings.recentHistoryRetentionMinutes = normalizeRecentHistoryRetentionMinutes(
         normalizedSettings.recentHistoryRetentionMinutes
+      );
+      normalizedSettings.unreadActiveWindowMinutes = normalizeUnreadActiveWindowMinutes(
+        normalizedSettings.unreadActiveWindowMinutes
       );
 
       return normalizedSettings;
@@ -266,16 +286,25 @@
       await chromeApi.storage.local.set({ [RECENT_POSTS_KEY]: mergedPosts });
     }
 
-    function hydrateUnreadPosts(recentPosts, unreadIds) {
+    function getUnreadHistoryOptions(settings, currentTime = now()) {
+      const normalizedSettings = normalizeSettings(settings);
+      return {
+        currentTime,
+        maxAgeMs: normalizedSettings.unreadActiveWindowMinutes * 60 * 1000
+      };
+    }
+
+    function hydrateUnreadPosts(recentPosts, unreadIds, settings = null) {
+      const unreadHistoryOptions = getUnreadHistoryOptions(settings);
       const postById = new Map(recentPosts.map((post) => [Number(post.id), post]));
       return unreadIds
         .map((postId) => postById.get(postId))
-        .filter(Boolean);
+        .filter((post) => post && isUnreadPostActive(post, unreadHistoryOptions));
     }
 
-    async function reconcileUnreadPosts(recentPosts) {
+    async function reconcileUnreadPosts(recentPosts, settings = null) {
       const unreadIds = await getStoredUnreadPostIds();
-      const unreadPosts = hydrateUnreadPosts(recentPosts, unreadIds);
+      const unreadPosts = hydrateUnreadPosts(recentPosts, unreadIds, settings);
       const visibleUnreadIds = unreadPosts.map((post) => Number(post.id)).filter(Number.isFinite);
 
       if (
@@ -294,7 +323,7 @@
     async function buildPopupResponse({ source, fallback = false, error = null }) {
       const settings = await loadSettings();
       const recentPosts = await getStoredRecentPosts(settings);
-      const { unreadIds, unreadPosts } = await reconcileUnreadPosts(recentPosts);
+      const { unreadIds, unreadPosts } = await reconcileUnreadPosts(recentPosts, settings);
 
       return {
         success: true,
@@ -344,10 +373,6 @@
             error: error.message || String(error)
           });
           response.posts = cachedPosts;
-          if (response.unreadPosts.length === 0) {
-            response.unreadPosts = cachedPosts;
-            response.unreadCount = cachedPosts.length;
-          }
           return response;
         }
 
@@ -480,6 +505,9 @@
       DEFAULT_RECENT_HISTORY_RETENTION_MINUTES,
       MIN_RECENT_HISTORY_RETENTION_MINUTES,
       MAX_RECENT_HISTORY_RETENTION_MINUTES,
+      DEFAULT_UNREAD_ACTIVE_WINDOW_MINUTES,
+      MIN_UNREAD_ACTIVE_WINDOW_MINUTES,
+      MAX_UNREAD_ACTIVE_WINDOW_MINUTES,
       RECENT_POSTS_KEY,
       UNREAD_POST_IDS_KEY,
       UNSUPPORTED_TEST_TAB_ERROR,
@@ -487,6 +515,7 @@
       normalizeToastDuration,
       normalizeRecentHistoryLimit,
       normalizeRecentHistoryRetentionMinutes,
+      normalizeUnreadActiveWindowMinutes,
       normalizeSettings,
       loadSettings,
       createCheckingWorkerStatus,
@@ -499,6 +528,7 @@
       getStoredUnreadPostIds,
       areStoredPostsEquivalent,
       storeRecentPosts,
+      getUnreadHistoryOptions,
       hydrateUnreadPosts,
       reconcileUnreadPosts,
       fetchPopupPostsDirectly,

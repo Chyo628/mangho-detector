@@ -16,6 +16,10 @@
     MIN_RECENT_HISTORY_RETENTION_MINUTES: 5,
     MAX_RECENT_HISTORY_RETENTION_MINUTES: 180,
     RECENT_HISTORY_RETENTION_MINUTES: 30,
+    DEFAULT_UNREAD_ACTIVE_WINDOW_MINUTES: 15,
+    MIN_UNREAD_ACTIVE_WINDOW_MINUTES: 1,
+    MAX_UNREAD_ACTIVE_WINDOW_MINUTES: 180,
+    UNREAD_ACTIVE_WINDOW_MINUTES: 15,
     KST_OFFSET_MS: 9 * 60 * 60 * 1000,
     CLOSED_RECRUITMENT_REGEX: /4\/4|\uD480\uBC29|\uB9C8\uAC10|\uC644\uB8CC|\uC885\uB8CC/i
   };
@@ -295,10 +299,16 @@
         return;
       }
 
+      const existingDetectedAt = Number(existingPost.detectedAt);
+      const nextDetectedAt = Number(normalizedPost.detectedAt);
+      const mergedDetectedAt = Number.isFinite(existingDetectedAt) && Number.isFinite(nextDetectedAt)
+        ? Math.min(existingDetectedAt, nextDetectedAt)
+        : (Number.isFinite(existingDetectedAt) ? existingDetectedAt : nextDetectedAt);
+
       mergedMap.set(normalizedPost.id, {
-        ...existingPost,
         ...normalizedPost,
-        detectedAt: Math.max(existingPost.detectedAt || 0, normalizedPost.detectedAt || 0)
+        ...existingPost,
+        detectedAt: mergedDetectedAt
       });
     });
 
@@ -369,6 +379,25 @@
       .slice(0, normalizedMaxCount);
   }
 
+  function isUnreadPostActive(post, options = {}) {
+    const {
+      currentTime = Date.now(),
+      maxAgeMs = constants.DEFAULT_UNREAD_ACTIVE_WINDOW_MINUTES * 60 * 1000
+    } = options;
+    const normalizedMaxAgeMs = Number.isFinite(Number(maxAgeMs))
+      ? Math.min(
+        constants.MAX_UNREAD_ACTIVE_WINDOW_MINUTES * 60 * 1000,
+        Math.max(constants.MIN_UNREAD_ACTIVE_WINDOW_MINUTES * 60 * 1000, Number(maxAgeMs))
+      )
+      : constants.DEFAULT_UNREAD_ACTIVE_WINDOW_MINUTES * 60 * 1000;
+    const detectedAt = Number(post?.detectedAt);
+    const detectedAgeMs = currentTime - detectedAt;
+
+    return Number.isFinite(detectedAt)
+      && detectedAgeMs >= 0
+      && detectedAgeMs <= normalizedMaxAgeMs;
+  }
+
   function extractLobbyLinkFromHtml(html) {
     const lobbyMatch = String(html || '').match(/steam:\/\/joinlobby\/\d+\/\d+\/\d+/);
     return lobbyMatch ? lobbyMatch[0] : null;
@@ -391,6 +420,7 @@
     refreshRelativeTimes,
     filterRecentOpenPosts,
     trimRecentHistoryPosts,
+    isUnreadPostActive,
     extractLobbyLinkFromHtml
   };
 
