@@ -124,6 +124,19 @@ test('getPopupPosts returns unread and history data from fetched posts plus stor
   assert.equal(response.unreadPosts[0].id, 10);
   assert.equal(response.historyPosts.length, 2);
   assert.ok(Array.isArray(fake.state.storageData.seaf_recent_posts));
+  assert.equal(fake.state.storageData.seaf_last_scan_at, undefined);
+});
+
+test('getPopupPosts records lastScanAt only for manual refresh requests', async () => {
+  const html = buildListHtml([
+    { id: 12, title: 'manual refresh', fullDateStr: '2026-03-09 10:04:00' }
+  ]);
+  const { core, fake } = createCore({
+    fetchImpl: createFetchOk(html)
+  });
+
+  await core.getPopupPosts({ recordScan: true });
+
   assert.equal(fake.state.storageData.seaf_last_scan_at, NOW);
 });
 
