@@ -33,6 +33,8 @@ const LABELS = {
   settingsSaved: '\uC124\uC815\uC744 \uC800\uC7A5\uD588\uC2B5\uB2C8\uB2E4.',
   detectionSaved: '\uC2E4\uC2DC\uAC04 \uAC10\uC9C0 \uC124\uC815\uC744 \uBC14\uAFB8\uC5C8\uC2B5\uB2C8\uB2E4.',
   browserAlertSaved: '\uBE0C\uB77C\uC6B0\uC800 \uC54C\uB9BC \uC124\uC815\uC744 \uBC14\uAFB8\uC5C8\uC2B5\uB2C8\uB2E4.',
+  masterToggleOn: '\uC2E4\uC2DC\uAC04 \uAC10\uC9C0\uC640 \uBE0C\uB77C\uC6B0\uC800 \uC54C\uB9BC\uC744 \uD568\uAED8 \uCF30\uC2B5\uB2C8\uB2E4.',
+  masterToggleOff: '\uC2E4\uC2DC\uAC04 \uAC10\uC9C0\uC640 \uBE0C\uB77C\uC6B0\uC800 \uC54C\uB9BC\uC744 \uD568\uAED8 \uB057\uC2B5\uB2C8\uB2E4.',
   toastDurationSaved: '\uC624\uBC84\uB808\uC774 \uC2DC\uAC04\uC744 \uBC14\uAFB8\uC5C8\uC2B5\uB2C8\uB2E4.',
   toastDurationClamped: '\uC624\uBC84\uB808\uC774 \uC2DC\uAC04\uC744 {seconds}\uCD08\uB85C \uC870\uC815\uD588\uC2B5\uB2C8\uB2E4.',
   historyLimitSaved: '\uCD5C\uADFC \uAC10\uC9C0 \uAE30\uB85D \uAC1C\uC218\uB97C \uBC14\uAFB8\uC5C8\uC2B5\uB2C8\uB2E4.',
@@ -82,6 +84,8 @@ async function initPopup() {
 function getElements() {
   return {
     versionDisplay: document.getElementById('seaf-version-display'),
+    masterToggle: document.getElementById('seaf-master-toggle'),
+    masterToggleLabel: document.getElementById('seaf-master-toggle-label'),
     markAllReadButton: document.getElementById('seaf-mark-all-read-button'),
     refreshButton: document.getElementById('seaf-refresh-button'),
     openGalleryButton: document.getElementById('seaf-open-gallery-button'),
@@ -153,6 +157,10 @@ function renderVersion(versionDisplay) {
 
 function renderSettings(elements, settings) {
   const normalizedSettings = popupCore.normalizeSettings(settings);
+  const isMasterEnabled = normalizedSettings.isDetectionActive && normalizedSettings.isSiteAlertEnabled;
+  elements.masterToggle.checked = isMasterEnabled;
+  elements.masterToggle.setAttribute('aria-checked', String(isMasterEnabled));
+  elements.masterToggleLabel.textContent = isMasterEnabled ? 'ON' : 'OFF';
   elements.detectionToggle.checked = normalizedSettings.isDetectionActive;
   elements.siteAlertToggle.checked = normalizedSettings.isSiteAlertEnabled;
   elements.toastDurationInput.value = String(normalizedSettings.toastDuration);
@@ -325,6 +333,20 @@ function normalizePosts(posts) {
 }
 
 function wireInteractions(elements, state) {
+  elements.masterToggle.addEventListener('change', async (event) => {
+    const isEnabled = Boolean(event.target.checked);
+    state.settings = {
+      ...state.settings,
+      isDetectionActive: isEnabled,
+      isSiteAlertEnabled: isEnabled
+    };
+    await saveSettings(
+      state,
+      elements,
+      isEnabled ? LABELS.masterToggleOn : LABELS.masterToggleOff
+    );
+  });
+
   elements.detectionToggle.addEventListener('change', async (event) => {
     state.settings = {
       ...state.settings,
@@ -484,7 +506,10 @@ async function refreshDashboard(state, elements, isManualRefresh) {
     let shouldUseDirectFetchFallback = false;
 
     try {
-      response = await chrome.runtime.sendMessage({ type: 'GET_LIVE_POSTS' });
+      response = await chrome.runtime.sendMessage({
+        type: 'GET_LIVE_POSTS',
+        manualRefresh: Boolean(isManualRefresh)
+      });
       shouldUseDirectFetchFallback = !response?.success;
     } catch (error) {
       if (!popupCore.isMissingReceiverError(error)) {

@@ -58,7 +58,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.type === 'GET_LIVE_POSTS') {
-    backgroundCore.getPopupPosts().then(sendResponse, async (error) => {
+    backgroundCore.getPopupPosts({
+      recordScan: Boolean(request.manualRefresh)
+    }).then(sendResponse, async (error) => {
       console.error('[SEAF] live posts fetch failed:', error);
       const settings = await backgroundCore.ensureSettings().catch(() => backgroundCore.DEFAULT_SETTINGS);
       sendResponse({

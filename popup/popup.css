@@ -84,6 +84,39 @@ body {
   gap: 10px;
 }
 
+.seaf-topbar-master-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px 6px 10px;
+  border: 1px solid rgba(216, 176, 78, 0.2);
+  border-radius: 999px;
+  background: rgba(13, 22, 19, 0.92);
+  box-shadow: var(--seaf-shadow);
+  cursor: pointer;
+}
+
+.seaf-topbar-master-copy {
+  color: var(--seaf-text-dim);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.seaf-toggle-compact {
+  transform: scale(0.86);
+  transform-origin: center;
+}
+
+.seaf-topbar-master-toggle:has(input:checked) {
+  border-color: rgba(140, 207, 139, 0.4);
+}
+
+.seaf-topbar-master-toggle:has(input:checked) .seaf-topbar-master-copy {
+  color: var(--seaf-ok);
+}
+
 .seaf-brand {
   display: flex;
   align-items: center;

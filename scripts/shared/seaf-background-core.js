@@ -308,9 +308,12 @@
       return response.text();
     }
 
-    async function fetchLivePosts() {
+    async function fetchLivePosts(options = {}) {
+      const { recordScan = true } = options;
       const html = await fetchText(DOMAIN_CONSTANTS.MANGHO_LIST_URL);
-      await setLastScanAt(now());
+      if (recordScan) {
+        await setLastScanAt(now());
+      }
       return parsePostsFromHtml(html, {
         currentTime: now(),
         limit: DOMAIN_CONSTANTS.LIVE_POST_LIMIT,
@@ -597,10 +600,11 @@
       };
     }
 
-    async function getPopupPosts() {
+    async function getPopupPosts(options = {}) {
+      const { recordScan = false } = options;
       try {
         const settings = await ensureSettings();
-        const livePosts = await fetchLivePosts();
+        const livePosts = await fetchLivePosts({ recordScan });
         if (livePosts.length > 0) {
           await storeRecentPosts(livePosts, settings);
         }

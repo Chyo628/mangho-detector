@@ -123,9 +123,81 @@ test('popup renders summary, unread feed, and saved settings', async () => {
     assert.equal(document.getElementById('seaf-history-limit-input').value, '18');
     assert.equal(document.getElementById('seaf-history-retention-input').value, '45');
     assert.equal(document.getElementById('seaf-unread-window-input').value, '20');
+    assert.equal(document.getElementById('seaf-master-toggle').checked, false);
+    assert.equal(document.getElementById('seaf-master-toggle-label').textContent, 'OFF');
     assert.equal(document.getElementById('seaf-site-alert-toggle').checked, false);
     assert.equal(document.getElementById('seaf-feed-count').textContent, '1');
     assert.equal(document.querySelector('.seaf-post-title').textContent, '테스트 모집');
+  } finally {
+    handle.cleanup();
+  }
+});
+
+test('popup master toggle updates detection and browser alerts together', async () => {
+  const handle = setupPopupTest({
+    storageData: {
+      seaf_settings: {
+        isDetectionActive: true,
+        pollingInterval: 30,
+        toastDuration: 10,
+        isSiteAlertEnabled: true,
+        recentHistoryLimit: 15,
+        recentHistoryRetentionMinutes: 30,
+        unreadActiveWindowMinutes: 15
+      }
+    }
+  });
+
+  try {
+    await handle.settle();
+
+    const masterToggle = document.getElementById('seaf-master-toggle');
+    assert.equal(masterToggle.checked, true);
+    assert.equal(document.getElementById('seaf-master-toggle-label').textContent, 'ON');
+
+    masterToggle.checked = false;
+    masterToggle.dispatchEvent(new window.Event('change', { bubbles: true }));
+    await handle.settle();
+
+    assert.equal(handle.fake.state.storageData.seaf_settings.isDetectionActive, false);
+    assert.equal(handle.fake.state.storageData.seaf_settings.isSiteAlertEnabled, false);
+    assert.equal(document.getElementById('seaf-detection-toggle').checked, false);
+    assert.equal(document.getElementById('seaf-site-alert-toggle').checked, false);
+    assert.equal(document.getElementById('seaf-master-toggle').checked, false);
+    assert.equal(document.getElementById('seaf-master-toggle-label').textContent, 'OFF');
+
+    masterToggle.checked = true;
+    masterToggle.dispatchEvent(new window.Event('change', { bubbles: true }));
+    await handle.settle();
+
+    assert.equal(handle.fake.state.storageData.seaf_settings.isDetectionActive, true);
+    assert.equal(handle.fake.state.storageData.seaf_settings.isSiteAlertEnabled, true);
+    assert.equal(document.getElementById('seaf-detection-toggle').checked, true);
+    assert.equal(document.getElementById('seaf-site-alert-toggle').checked, true);
+    assert.equal(document.getElementById('seaf-master-toggle').checked, true);
+    assert.equal(document.getElementById('seaf-master-toggle-label').textContent, 'ON');
+  } finally {
+    handle.cleanup();
+  }
+});
+
+test('popup uses manualRefresh only for explicit refresh clicks', async () => {
+  const handle = setupPopupTest();
+
+  try {
+    await handle.settle();
+
+    const liveRequests = handle.fake.state.runtimeSentMessages.filter((message) => message.type === 'GET_LIVE_POSTS');
+    assert.equal(liveRequests.length >= 1, true);
+    assert.equal(liveRequests[0].manualRefresh, false);
+
+    document.getElementById('seaf-refresh-button')
+      .dispatchEvent(new window.Event('click', { bubbles: true }));
+    await handle.settle();
+
+    const updatedLiveRequests = handle.fake.state.runtimeSentMessages
+      .filter((message) => message.type === 'GET_LIVE_POSTS');
+    assert.equal(updatedLiveRequests.at(-1).manualRefresh, true);
   } finally {
     handle.cleanup();
   }
