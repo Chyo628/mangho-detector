@@ -1,10 +1,15 @@
 const DEFAULT_SETTINGS = {
   isSiteAlertEnabled: true,
-  toastDuration: 10
+  toastDuration: 10,
+  authorRecords: [],
+  authorBanEntries: [],
+  authorBanOverlayMode: 'warn',
+  confirmBannedAuthorJoin: true
 };
 
 const MIN_TOAST_DURATION_SECONDS = 3;
 const MAX_TOAST_DURATION_SECONDS = 30;
+const FETCH_TIMEOUT_MS = 10000;
 const ENTRY_TOAST_LIMIT = 3;
 const SURFACED_POST_RETENTION_MS = 20 * 60 * 1000;
 const MAX_SURFACED_POST_IDS = 200;
@@ -14,6 +19,12 @@ const LABELS = {
   listAlert: '\uBAA9\uB85D \uAC10\uC9C0',
   testAlert: '\uD14C\uC2A4\uD2B8 \uC54C\uB9BC',
   join: '\uCC38\uAC00',
+  bannedJoin: '\uC8FC\uC758 \u00B7 \uCC38\uAC00',
+  bannedAuthorFallback: '\uBC34 \uBAA9\uB85D\uC5D0 \uC788\uB294 \uAE00\uC4F4\uC774\uC785\uB2C8\uB2E4.',
+  bannedAuthorConfirmTitle: '\uBC34 \uAE00\uC4F4\uC774 \uCC38\uAC00 \uD655\uC778',
+  bannedAuthorConfirmBody: '\uBC34 \uBAA9\uB85D \uAE00\uC4F4\uC774\uC785\uB2C8\uB2E4. \uCC38\uAC00\uB97C \uACC4\uC18D\uD558\uB824\uBA74 \uD55C \uBC88 \uB354 \uD655\uC778\uD558\uC138\uC694.',
+  continueJoin: '\uACC4\uC18D \uCC38\uAC00',
+  cancel: '\uCDE8\uC18C',
   joining: '\uC5F0\uACB0 \uC911...',
   done: '\uC644\uB8CC',
   failed: '\uC2E4\uD328',
@@ -25,14 +36,44 @@ const LABELS = {
   postRequestFailedPrefix: '\uAC8C\uC2DC\uAE00 \uC694\uCCAD \uC2E4\uD328: '
 };
 
+function getJoinGuardNamespace() {
+  if (globalThis.SEAFJoinGuard?.createJoinGuardController) {
+    return globalThis.SEAFJoinGuard;
+  }
+
+  if (typeof require === 'function') {
+    globalThis.SEAFJoinGuard = require('./shared/seaf-join-guard.js');
+    return globalThis.SEAFJoinGuard;
+  }
+
+  throw new Error('SEAFJoinGuard must be loaded before the content script.');
+}
+
+function getFetchNamespace() {
+  if (globalThis.SEAFFetch?.createFetchRuntime) {
+    return globalThis.SEAFFetch;
+  }
+
+  if (typeof require === 'function') {
+    globalThis.SEAFFetch = require('./shared/seaf-fetch.js');
+    return globalThis.SEAFFetch;
+  }
+
+  throw new Error('SEAFFetch must be loaded before the content script.');
+}
+
 const SEAFContent = {
   state: {
     settings: { ...DEFAULT_SETTINGS },
     observer: null,
+    listBodyObserver: null,
     listBody: null,
     isManghoFilteredList: false,
     surfacedPostIds: new Map(),
-    listenersRegistered: false
+    listenersRegistered: false,
+    initPromise: null,
+    initialized: false,
+    fetchRuntime: null
   },
 
   async init() {
@@ -40,20 +81,25 @@ const SEAFContent = {
       return;
     }
 
-    await this.loadSettings();
-    this.state.listBody = this.getListBody();
-    this.state.isManghoFilteredList = this.isManghoFilteredListPage();
-
-    if (!this.state.listBody) {
+    if (this.state.initialized) {
       return;
     }
 
-    this.registerListeners();
-    this.processRows(this.getInitialRows(), {
-      surfaceOpenPosts: false,
-      toastLimit: ENTRY_TOAST_LIMIT
-    });
-    this.observeListChanges();
+    if (!this.state.initPromise) {
+      this.state.initPromise = (async () => {
+        await this.loadSettings();
+        this.state.isManghoFilteredList = this.isManghoFilteredListPage();
+        this.registerListeners();
+        this.connectListBody(this.getListBody());
+        this.observeListBodyChanges();
+        this.state.initialized = true;
+      })().catch((error) => {
+        this.state.initPromise = null;
+        throw error;
+      });
+    }
+
+    await this.state.initPromise;
   },
 
   async loadSettings() {
@@ -62,7 +108,10 @@ const SEAFContent = {
   },
 
   normalizeSettings(savedSettings) {
-    const normalizedSettings = { ...DEFAULT_SETTINGS, ...savedSettings };
+    const sourceSettings = savedSettings && typeof savedSettings === 'object'
+      ? savedSettings
+      : {};
+    const normalizedSettings = { ...DEFAULT_SETTINGS, ...sourceSettings };
     const numericToastDuration = Number(normalizedSettings.toastDuration);
 
     normalizedSettings.toastDuration = Number.isFinite(numericToastDuration)
@@ -72,6 +121,32 @@ const SEAFContent = {
       )
       : DEFAULT_SETTINGS.toastDuration;
     normalizedSettings.isSiteAlertEnabled = Boolean(normalizedSettings.isSiteAlertEnabled);
+    const canonicalAuthorRecords = Array.isArray(sourceSettings.authorRecords)
+      ? sourceSettings.authorRecords
+      : [];
+    const legacyAuthorBanRecords = (Array.isArray(sourceSettings.authorBanEntries)
+      ? sourceSettings.authorBanEntries
+      : [])
+      .map((record) => (
+        record && typeof record === 'object'
+          ? { ...record, status: 'banned' }
+          : record
+      ));
+    const authorRecordInput = [...canonicalAuthorRecords, ...legacyAuthorBanRecords];
+    normalizedSettings.authorRecords = typeof globalThis.SEAFDomain.normalizeAuthorRecords === 'function'
+      ? globalThis.SEAFDomain.normalizeAuthorRecords(authorRecordInput)
+      : [];
+    normalizedSettings.authorBanEntries = globalThis.SEAFDomain.normalizeAuthorBanEntries(
+      normalizedSettings.authorBanEntries
+    );
+    normalizedSettings.useLegacyAuthorBanFallback = normalizedSettings.authorRecords.length === 0
+      && normalizedSettings.authorBanEntries.length > 0;
+    normalizedSettings.authorBanOverlayMode = globalThis.SEAFDomain.normalizeAuthorBanOverlayMode(
+      normalizedSettings.authorBanOverlayMode
+    );
+    normalizedSettings.confirmBannedAuthorJoin = globalThis.SEAFDomain.normalizeConfirmBannedAuthorJoin(
+      normalizedSettings.confirmBannedAuthorJoin
+    );
 
     return normalizedSettings;
   },
@@ -86,7 +161,53 @@ const SEAFContent = {
   },
 
   getInitialRows() {
-    return [...this.state.listBody.querySelectorAll('.ub-content[data-no]')];
+    return this.state.listBody
+      ? [...this.state.listBody.querySelectorAll('.ub-content[data-no]')]
+      : [];
+  },
+
+  connectListBody(listBody) {
+    const nextListBody = listBody || null;
+    if (
+      this.state.listBody === nextListBody &&
+      (!nextListBody || this.state.observer)
+    ) {
+      return;
+    }
+
+    if (this.state.observer) {
+      this.state.observer.disconnect();
+      this.state.observer = null;
+    }
+
+    this.state.listBody = nextListBody;
+    if (!nextListBody) {
+      return;
+    }
+
+    this.processRows(this.getInitialRows(), {
+      surfaceOpenPosts: false,
+      toastLimit: ENTRY_TOAST_LIMIT
+    });
+    this.observeListChanges();
+  },
+
+  observeListBodyChanges() {
+    if (this.state.listBodyObserver || !document.documentElement) {
+      return;
+    }
+
+    this.state.listBodyObserver = new MutationObserver(() => {
+      const currentListBody = this.getListBody();
+      if (currentListBody !== this.state.listBody) {
+        this.connectListBody(currentListBody);
+      }
+    });
+
+    this.state.listBodyObserver.observe(document.documentElement, {
+      childList: true,
+      subtree: true
+    });
   },
 
   registerListeners() {
@@ -101,11 +222,17 @@ const SEAFContent = {
         }
 
         const postId = Number(message.postId);
+        const author = this.normalizeAuthor(message.author);
+        const authorSummary = this.getAuthorRecordSummary(author);
+        const isBannedAuthor = authorSummary.isBanned;
         if (this.hasSurfacedPost(postId)) {
           return;
         }
 
         this.markPostSurfaced(postId);
+        if (isBannedAuthor && this.state.settings.authorBanOverlayMode === 'hide') {
+          return;
+        }
 
         this.renderOverlay({
           sourceLabel: LABELS.manghoAlert,
@@ -114,7 +241,13 @@ const SEAFContent = {
             title: message.title,
             relativeTime: message.relativeTime,
             postUrl: message.postUrl || this.buildPostUrl(postId),
-            toastDuration: message.toastDuration
+            toastDuration: message.toastDuration,
+            author,
+            isBannedAuthor,
+            authorNote: authorSummary.note,
+            hasAuthorNote: authorSummary.hasNote,
+            authorBanNote: isBannedAuthor ? authorSummary.banNote : '',
+            confirmBannedAuthorJoin: this.state.settings.confirmBannedAuthorJoin
           }]
         });
         return;
@@ -149,12 +282,18 @@ const SEAFContent = {
       }
 
       this.state.settings = this.normalizeSettings(changes.seaf_settings.newValue);
+      this.refreshJoinButtonStates();
     });
 
     this.state.listenersRegistered = true;
   },
 
   observeListChanges() {
+    if (this.state.observer) {
+      this.state.observer.disconnect();
+      this.state.observer = null;
+    }
+
     if (!this.state.listBody) {
       return;
     }
@@ -219,7 +358,7 @@ const SEAFContent = {
         return;
       }
 
-      this.ensureJoinButton(row, parsedRow.titleLink, parsedRow.post.id);
+      this.ensureJoinButton(row, parsedRow.titleLink, parsedRow.post.id, parsedRow.post.author);
 
       if (
         surfaceOpenPosts &&
@@ -269,6 +408,7 @@ const SEAFContent = {
     }
 
     const dateCell = row.querySelector('.gall_date');
+    const author = this.parseAuthorFromRow(row);
     const post = globalThis.SEAFDomain.normalizePost(
       {
         id: postId,
@@ -282,27 +422,427 @@ const SEAFContent = {
         viewUrlPrefix: globalThis.SEAFDomain.constants.VIEW_URL_PREFIX
       }
     );
+    post.author = author;
 
     return { post, titleLink };
   },
 
-  ensureJoinButton(row, titleLink, postId) {
-    if (row.hasAttribute('data-seaf-processed')) {
+  parseAuthorFromRow(row) {
+    const writerElements = [...row.querySelectorAll('.gall_writer')];
+    const writerElement = writerElements.find((element) => {
+      const nickname = element.getAttribute('data-nick') || '';
+      const uid = element.getAttribute('data-uid') || '';
+      const ip = element.getAttribute('data-ip') || '';
+      const displayName = element.textContent.trim();
+      return Boolean(nickname || uid || ip || displayName);
+    });
+    if (!writerElement) {
+      return null;
+    }
+
+    return this.normalizeAuthor({
+      nickname: writerElement.getAttribute('data-nick') || '',
+      uid: writerElement.getAttribute('data-uid') || '',
+      ip: writerElement.getAttribute('data-ip') || '',
+      displayName: writerElement.textContent.trim()
+    });
+  },
+
+  normalizeAuthor(author) {
+    if (!author) {
+      return null;
+    }
+    return globalThis.SEAFDomain.normalizeAuthor(author);
+  },
+
+  isBannedAuthor(author) {
+    return this.getAuthorRecordSummary(author).isBanned;
+  },
+
+  getAuthorBanNote(author) {
+    const summary = this.getAuthorRecordSummary(author);
+    return summary.isBanned ? summary.banNote : '';
+  },
+
+  getAuthorNote(author) {
+    return this.getAuthorRecordSummary(author).note;
+  },
+
+  getAuthorRecordSummary(author) {
+    const emptySummary = {
+      isBanned: false,
+      hasNote: false,
+      note: '',
+      hasBanNote: false,
+      banNote: '',
+      matches: [],
+      primaryRecord: null,
+      primaryBannedRecord: null
+    };
+    if (!author) {
+      return emptySummary;
+    }
+
+    if (
+      !this.state.settings.useLegacyAuthorBanFallback
+      && typeof globalThis.SEAFDomain.getAuthorRecordMatchSummary === 'function'
+    ) {
+      const summary = globalThis.SEAFDomain.getAuthorRecordMatchSummary(
+        author,
+        this.state.settings.authorRecords
+      ) || emptySummary;
+      const note = String(summary.note || '').trim();
+      const banNote = String(summary.banNote || '').trim();
+      return {
+        ...emptySummary,
+        ...summary,
+        isBanned: Boolean(summary.isBanned),
+        hasNote: Boolean(summary.hasNote || note),
+        note,
+        hasBanNote: Boolean(summary.hasBanNote || banNote),
+        banNote
+      };
+    }
+
+    const isBanned = globalThis.SEAFDomain.isAuthorBanned(
+      author,
+      this.state.settings.authorBanEntries
+    );
+    const note = isBanned
+      ? String(globalThis.SEAFDomain.getAuthorBanNote(
+        author,
+        this.state.settings.authorBanEntries
+      ) || '').trim()
+      : '';
+    return {
+      ...emptySummary,
+      isBanned,
+      hasNote: Boolean(note),
+      note,
+      hasBanNote: Boolean(note),
+      banNote: note
+    };
+  },
+
+  refreshJoinButtonStates() {
+    if (!this.state.listBody) {
       return;
     }
 
+    this.processRows(this.getInitialRows(), { surfaceOpenPosts: false });
+  },
+
+  ensureJoinButton(row, titleLink, postId, author) {
+    const existingButton = row.querySelector('.seaf-inline-join-button');
+    if (row.hasAttribute('data-seaf-processed') && existingButton) {
+      this.updateInlineJoinButton(existingButton, postId, author);
+      return;
+    }
+
+    const wrapper = document.createElement('span');
+    wrapper.className = 'seaf-inline-join-wrap';
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'seaf-inline-join-button';
-    button.innerText = LABELS.join;
+    wrapper.addEventListener('mouseenter', () => {
+      this.updateInlineTooltipPlacement(wrapper);
+    });
+    wrapper.addEventListener('focusin', () => {
+      this.updateInlineTooltipPlacement(wrapper);
+    });
+    wrapper.addEventListener('keydown', (event) => {
+      if (event.key !== 'Escape') {
+        return;
+      }
+
+      const controller = wrapper.__seafJoinGuard;
+      if (!controller) {
+        return;
+      }
+
+      const snapshot = controller.getSnapshot();
+      if (snapshot.phase !== getJoinGuardNamespace().PHASES.confirm && snapshot.phase !== getJoinGuardNamespace().PHASES.error) {
+        return;
+      }
+
+      event.preventDefault();
+      controller.cancel();
+      this.renderInlineJoinGuardState(wrapper, button, postId, author);
+      button.focus();
+    });
     button.addEventListener('click', async (event) => {
       event.preventDefault();
       event.stopPropagation();
-      await this.joinPost(postId, button);
+      const result = this.requestInlineJoin(wrapper, button, postId, author);
+      if (result?.action === 'execute') {
+        await this.executeInlineJoin(wrapper, button, postId, author);
+      }
     });
 
-    titleLink.after(button);
+    wrapper.appendChild(button);
+    titleLink.after(wrapper);
     row.setAttribute('data-seaf-processed', 'true');
+    this.updateInlineJoinButton(button, postId, author);
+  },
+
+  updateInlineJoinButton(button, postId, author) {
+    const wrapper = button.closest('.seaf-inline-join-wrap');
+    const authorSummary = this.getAuthorRecordSummary(author);
+    const isBannedAuthor = authorSummary.isBanned;
+    const isNotedAuthor = authorSummary.hasNote && !isBannedAuthor;
+    const defaultLabel = isBannedAuthor ? LABELS.bannedJoin : LABELS.join;
+    const joinGuard = this.getInlineJoinGuard(wrapper, {
+      isBannedAuthor,
+      authorBanNote: isBannedAuthor ? authorSummary.banNote : '',
+      confirmBannedAuthorJoin: this.state.settings.confirmBannedAuthorJoin
+    });
+
+    button.dataset.defaultLabel = defaultLabel;
+    button.classList.toggle('seaf-inline-join-button--banned', isBannedAuthor);
+    button.classList.toggle('seaf-inline-join-button--noted', isNotedAuthor);
+    button.dataset.authorBanned = String(isBannedAuthor);
+    button.dataset.authorNoted = String(isNotedAuthor);
+    button.dataset.authorStatus = isBannedAuthor ? 'banned' : (isNotedAuthor ? 'note' : 'none');
+    if (!button.disabled && joinGuard.getSnapshot().phase !== getJoinGuardNamespace().PHASES.confirm) {
+      button.textContent = defaultLabel;
+    }
+
+    if (!wrapper) {
+      return;
+    }
+
+    let tooltip = wrapper.querySelector('.seaf-inline-author-tooltip');
+    if (!isBannedAuthor) {
+      wrapper.querySelector('.seaf-inline-join-confirm')?.remove();
+      button.removeAttribute('aria-controls');
+      button.setAttribute('aria-expanded', 'false');
+      wrapper.dataset.confirmOpen = 'false';
+    }
+
+    if (!isBannedAuthor && !isNotedAuthor) {
+      tooltip?.remove();
+      button.removeAttribute('aria-describedby');
+      return;
+    }
+
+    if (!tooltip) {
+      tooltip = document.createElement('span');
+      tooltip.className = 'seaf-inline-author-tooltip';
+      tooltip.setAttribute('role', 'tooltip');
+      wrapper.appendChild(tooltip);
+    }
+
+    tooltip.classList.toggle('seaf-inline-ban-tooltip', isBannedAuthor);
+    tooltip.classList.toggle('seaf-inline-note-tooltip', isNotedAuthor);
+    const tooltipId = `seaf-inline-author-tooltip-${Number(postId) || 'unknown'}`;
+    tooltip.id = tooltipId;
+    tooltip.textContent = isBannedAuthor
+      ? (authorSummary.banNote || LABELS.bannedAuthorFallback)
+      : authorSummary.note;
+    button.setAttribute('aria-describedby', tooltipId);
+    if (isBannedAuthor) {
+      this.renderInlineJoinGuardState(wrapper, button, postId, author);
+    }
+  },
+
+  getInlineJoinGuard(wrapper, options) {
+    if (!wrapper) {
+      return null;
+    }
+
+    const joinGuardApi = getJoinGuardNamespace();
+    if (!wrapper.__seafJoinGuard) {
+      wrapper.__seafJoinGuard = joinGuardApi.createJoinGuardController(options);
+    } else {
+      wrapper.__seafJoinGuard.sync(options);
+    }
+
+    return wrapper.__seafJoinGuard;
+  },
+
+  requestInlineJoin(wrapper, button, postId, author) {
+    const authorSummary = this.getAuthorRecordSummary(author);
+    const joinGuard = this.getInlineJoinGuard(wrapper, {
+      isBannedAuthor: authorSummary.isBanned,
+      authorBanNote: authorSummary.isBanned ? authorSummary.banNote : '',
+      confirmBannedAuthorJoin: this.state.settings.confirmBannedAuthorJoin
+    });
+    const result = joinGuard.requestJoin();
+    this.renderInlineJoinGuardState(wrapper, button, postId, author);
+    return result;
+  },
+
+  async executeInlineJoin(wrapper, button, postId, author) {
+    const authorSummary = this.getAuthorRecordSummary(author);
+    const joinGuard = this.getInlineJoinGuard(wrapper, {
+      isBannedAuthor: authorSummary.isBanned,
+      authorBanNote: authorSummary.isBanned ? authorSummary.banNote : '',
+      confirmBannedAuthorJoin: this.state.settings.confirmBannedAuthorJoin
+    });
+    const confirmButton = wrapper?.querySelector('.seaf-inline-join-confirm-button');
+    const cancelButton = wrapper?.querySelector('.seaf-inline-join-cancel-button');
+    const feedback = wrapper?.querySelector('.seaf-inline-join-feedback');
+
+    if (confirmButton) {
+      confirmButton.disabled = true;
+    }
+    if (cancelButton) {
+      cancelButton.disabled = true;
+    }
+    if (feedback) {
+      feedback.textContent = '';
+    }
+
+    const result = await this.joinPost(postId, button);
+    if (result.success) {
+      joinGuard.complete();
+    } else {
+      joinGuard.fail(result.errorMessage || LABELS.failed);
+    }
+
+    if (confirmButton) {
+      confirmButton.disabled = false;
+    }
+    if (cancelButton) {
+      cancelButton.disabled = false;
+    }
+    if (feedback) {
+      feedback.textContent = result.success ? '' : (result.errorMessage || LABELS.failed);
+    }
+
+    this.renderInlineJoinGuardState(wrapper, button, postId, author);
+  },
+
+  renderInlineJoinGuardState(wrapper, button, postId, author) {
+    if (!wrapper || !button) {
+      return;
+    }
+
+    const authorSummary = this.getAuthorRecordSummary(author);
+    const joinGuard = this.getInlineJoinGuard(wrapper, {
+      isBannedAuthor: authorSummary.isBanned,
+      authorBanNote: authorSummary.isBanned ? authorSummary.banNote : '',
+      confirmBannedAuthorJoin: this.state.settings.confirmBannedAuthorJoin
+    });
+    const snapshot = joinGuard.getSnapshot();
+    if (!snapshot.isBannedAuthor) {
+      wrapper.querySelector('.seaf-inline-join-confirm')?.remove();
+      wrapper.dataset.confirmOpen = 'false';
+      button.removeAttribute('aria-controls');
+      button.setAttribute('aria-expanded', 'false');
+      return;
+    }
+
+    const panelId = `seaf-inline-join-confirm-${Number(postId) || 'unknown'}`;
+    let panel = wrapper.querySelector('.seaf-inline-join-confirm');
+    let feedback = wrapper.querySelector('.seaf-inline-join-feedback');
+    let continueButton = wrapper.querySelector('.seaf-inline-join-confirm-button');
+    let cancelButton = wrapper.querySelector('.seaf-inline-join-cancel-button');
+
+    if (!panel) {
+      panel = document.createElement('div');
+      panel.className = 'seaf-inline-join-confirm';
+      panel.id = panelId;
+      panel.setAttribute('role', 'group');
+      panel.hidden = true;
+
+      const title = document.createElement('p');
+      title.className = 'seaf-inline-join-confirm-title';
+      title.textContent = LABELS.bannedAuthorConfirmTitle;
+
+      const body = document.createElement('p');
+      body.className = 'seaf-inline-join-confirm-body';
+      body.textContent = LABELS.bannedAuthorConfirmBody;
+
+      const note = document.createElement('p');
+      note.className = 'seaf-inline-join-confirm-note';
+
+      feedback = document.createElement('p');
+      feedback.className = 'seaf-inline-join-feedback';
+      feedback.setAttribute('role', 'status');
+
+      const actions = document.createElement('div');
+      actions.className = 'seaf-inline-join-confirm-actions';
+
+      cancelButton = document.createElement('button');
+      cancelButton.type = 'button';
+      cancelButton.className = 'seaf-inline-join-cancel-button';
+      cancelButton.textContent = LABELS.cancel;
+      cancelButton.addEventListener('click', () => {
+        joinGuard.cancel();
+        this.renderInlineJoinGuardState(wrapper, button, postId, author);
+        button.focus();
+      });
+
+      continueButton = document.createElement('button');
+      continueButton.type = 'button';
+      continueButton.className = 'seaf-inline-join-confirm-button';
+      continueButton.textContent = LABELS.continueJoin;
+      continueButton.addEventListener('click', async () => {
+        const result = joinGuard.requestJoin();
+        this.renderInlineJoinGuardState(wrapper, button, postId, author);
+        if (result.action === 'execute') {
+          await this.executeInlineJoin(wrapper, button, postId, author);
+        }
+      });
+
+      actions.append(cancelButton, continueButton);
+      panel.append(title, body, note, feedback, actions);
+      wrapper.appendChild(panel);
+    }
+
+    const noteElement = panel.querySelector('.seaf-inline-join-confirm-note');
+    noteElement.textContent = snapshot.authorBanNote || LABELS.bannedAuthorFallback;
+
+    const showPanel = snapshot.phase === getJoinGuardNamespace().PHASES.confirm
+      || snapshot.phase === getJoinGuardNamespace().PHASES.error;
+    panel.hidden = !showPanel;
+    wrapper.dataset.confirmOpen = String(showPanel);
+    button.setAttribute('aria-expanded', String(showPanel));
+    if (showPanel) {
+      button.setAttribute('aria-controls', panelId);
+    } else {
+      button.removeAttribute('aria-controls');
+      if (feedback) {
+        feedback.textContent = '';
+      }
+    }
+
+    if (feedback && snapshot.phase === getJoinGuardNamespace().PHASES.error) {
+      feedback.textContent = snapshot.errorMessage || LABELS.failed;
+    }
+
+    continueButton.textContent = snapshot.phase === getJoinGuardNamespace().PHASES.submitting
+      ? LABELS.joining
+      : LABELS.continueJoin;
+    continueButton.disabled = snapshot.phase === getJoinGuardNamespace().PHASES.submitting;
+    cancelButton.disabled = snapshot.phase === getJoinGuardNamespace().PHASES.submitting;
+    this.updateInlineTooltipPlacement(wrapper);
+  },
+
+  updateInlineTooltipPlacement(wrapper) {
+    const tooltip = wrapper?.querySelector('.seaf-inline-author-tooltip');
+    if (!tooltip) {
+      return;
+    }
+
+    tooltip.classList.remove(
+      'seaf-inline-ban-tooltip--align-left',
+      'seaf-inline-ban-tooltip--align-right',
+      'seaf-inline-ban-tooltip--below'
+    );
+
+    const tooltipRect = tooltip.getBoundingClientRect();
+    const safePadding = 8;
+    if (tooltipRect.left < safePadding) {
+      tooltip.classList.add('seaf-inline-ban-tooltip--align-left');
+    } else if (tooltipRect.right > window.innerWidth - safePadding) {
+      tooltip.classList.add('seaf-inline-ban-tooltip--align-right');
+    }
+
+    if (tooltipRect.top < safePadding) {
+      tooltip.classList.add('seaf-inline-ban-tooltip--below');
+    }
   },
 
   pruneSurfacedPostIds(currentTime = Date.now()) {
@@ -341,27 +881,49 @@ const SEAFContent = {
     this.pruneSurfacedPostIds(surfacedAt);
     this.state.surfacedPostIds.delete(normalizedPostId);
     this.state.surfacedPostIds.set(normalizedPostId, surfacedAt);
+    this.pruneSurfacedPostIds(surfacedAt);
   },
 
   surfaceOpenPosts(posts, toastLimit) {
+    const visiblePosts = [];
+
     posts
       .sort((left, right) => right.id - left.id)
-      .slice(0, toastLimit)
-      .forEach((post, index) => {
+      .forEach((post) => {
+        const authorSummary = this.getAuthorRecordSummary(post.author);
+        const isBannedAuthor = authorSummary.isBanned;
         this.markPostSurfaced(post.id);
-        window.setTimeout(() => {
-          this.renderOverlay({
-            sourceLabel: LABELS.listAlert,
-            posts: [{
-              id: post.id,
-              title: post.title,
-              relativeTime: post.relativeTime || '\uBC29\uAE08 \uAC10\uC9C0',
-              postUrl: post.postUrl,
-              toastDuration: this.state.settings.toastDuration * 1000
-            }]
-          });
-        }, 250 * index);
+        if (isBannedAuthor && this.state.settings.authorBanOverlayMode === 'hide') {
+          return;
+        }
+
+        if (visiblePosts.length >= toastLimit) {
+          return;
+        }
+
+        visiblePosts.push({ post, authorSummary });
       });
+
+    visiblePosts.forEach(({ post, authorSummary }, index) => {
+      window.setTimeout(() => {
+        this.renderOverlay({
+          sourceLabel: LABELS.listAlert,
+          posts: [{
+            id: post.id,
+            title: post.title,
+            relativeTime: post.relativeTime || '\uBC29\uAE08 \uAC10\uC9C0',
+            postUrl: post.postUrl,
+            toastDuration: this.state.settings.toastDuration * 1000,
+            author: post.author,
+            isBannedAuthor: authorSummary.isBanned,
+            authorNote: authorSummary.note,
+            hasAuthorNote: authorSummary.hasNote,
+            authorBanNote: authorSummary.isBanned ? authorSummary.banNote : '',
+            confirmBannedAuthorJoin: this.state.settings.confirmBannedAuthorJoin
+          }]
+        });
+      }, 250 * index);
+    });
   },
 
   renderOverlay(payload) {
@@ -379,9 +941,9 @@ const SEAFContent = {
   },
 
   async joinPost(postId, button) {
-    const originalText = button.innerText;
+    const originalText = button.textContent;
     button.disabled = true;
-    button.innerText = LABELS.joining;
+    button.textContent = LABELS.joining;
 
     try {
       const response = await chrome.runtime.sendMessage({
@@ -397,7 +959,8 @@ const SEAFContent = {
         window.location.href = response.link;
       }
 
-      button.innerText = LABELS.done;
+      button.textContent = LABELS.done;
+      return { success: true };
     } catch (error) {
       try {
         const directLink = await this.extractLobbyLinkDirectly(postId);
@@ -406,30 +969,43 @@ const SEAFContent = {
         }
 
         window.location.href = directLink;
-        button.innerText = LABELS.done;
+        button.textContent = LABELS.done;
+        return { success: true };
       } catch (fallbackError) {
         console.error(LABELS.joinFailed, fallbackError);
-        button.innerText = LABELS.failed;
+        button.textContent = LABELS.failed;
+        return {
+          success: false,
+          errorMessage: String(fallbackError?.message || fallbackError || LABELS.joinFailed).trim()
+        };
       }
+    } finally {
+      window.setTimeout(() => {
+        button.disabled = false;
+        button.textContent = button.dataset.defaultLabel || originalText;
+      }, 1600);
     }
-
-    window.setTimeout(() => {
-      button.disabled = false;
-      button.innerText = originalText;
-    }, 1600);
   },
 
   async extractLobbyLinkDirectly(postId) {
-    const response = await fetch(
-      `${globalThis.SEAFDomain.constants.VIEW_URL_PREFIX}${postId}`,
-      { cache: 'no-store' }
+    const html = await this.fetchText(
+      `${globalThis.SEAFDomain.constants.VIEW_URL_PREFIX}${postId}`
     );
-    if (!response.ok) {
-      throw new Error(`${LABELS.postRequestFailedPrefix}${response.status}`);
+    return globalThis.SEAFDomain.extractLobbyLinkFromHtml(html);
+  },
+
+  async fetchText(url) {
+    if (!this.state.fetchRuntime) {
+      this.state.fetchRuntime = getFetchNamespace().createFetchRuntime({
+        fetchImpl: (...args) => fetch(...args),
+        defaultTimeoutMs: FETCH_TIMEOUT_MS
+      });
     }
 
-    const html = await response.text();
-    return globalThis.SEAFDomain.extractLobbyLinkFromHtml(html);
+    return this.state.fetchRuntime.fetchText(url, {
+      timeoutMs: FETCH_TIMEOUT_MS,
+      timeoutErrorMessage: 'Request timed out.'
+    });
   },
 
   buildPostUrl(postId) {

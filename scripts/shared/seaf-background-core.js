@@ -4,8 +4,10 @@
   const RECENT_POSTS_KEY = 'seaf_recent_posts';
   const SETTINGS_KEY = 'seaf_settings';
   const UNREAD_POST_IDS_KEY = 'seaf_unread_post_ids';
+  const POST_OPEN_STATES_KEY = 'seaf_post_open_states';
   const LAST_SCAN_AT_KEY = 'seaf_last_scan_at';
   const LAST_SURFACE_STATE_KEY = 'seaf_last_surface_state';
+  const DEFAULT_FETCH_TIMEOUT_MS = 10000;
   const FIXED_POLLING_INTERVAL_SECONDS = 30;
   const LEGACY_TOAST_DURATION_SECONDS = 6;
   const DEFAULT_TOAST_DURATION_SECONDS = 10;
@@ -20,10 +22,11 @@
   const DEFAULT_UNREAD_ACTIVE_WINDOW_MINUTES = 15;
   const MIN_UNREAD_ACTIVE_WINDOW_MINUTES = 1;
   const MAX_UNREAD_ACTIVE_WINDOW_MINUTES = 180;
-  const JOIN_HELPER_PATH = 'helper/join.html';
   const UNSUPPORTED_TEST_TAB_ERROR = '현재 탭에서는 오버레이 테스트를 실행할 수 없습니다.';
   const LIST_PAGE_NOT_READY_ERROR = '목록 페이지가 아직 준비되지 않았습니다.';
   const LOBBY_LINK_NOT_FOUND_ERROR = '로비 링크를 찾지 못했습니다.';
+  const FETCH_TIMEOUT_ERROR = 'Request timed out.';
+  const OPTIONAL_PERMISSION_REMOVED_MESSAGE = '\uC0AC\uC774\uD2B8 \uC811\uADFC \uAD8C\uD55C\uC774 \uD574\uC81C\uB418\uC5B4 \uBE0C\uB77C\uC6B0\uC800 \uC54C\uB9BC\uC744 \uAECF\uC2B5\uB2C8\uB2E4.';
   const BADGE_COLOR = '#E8C547';
   const MAX_BADGE_COUNT = 99;
   const DEFAULT_SETTINGS = {
@@ -31,6 +34,9 @@
     pollingInterval: FIXED_POLLING_INTERVAL_SECONDS,
     toastDuration: DEFAULT_TOAST_DURATION_SECONDS,
     isSiteAlertEnabled: true,
+    confirmBannedAuthorJoin: true,
+    authorRecords: [],
+    authorBanOverlayMode: 'warn',
     recentHistoryLimit: DEFAULT_RECENT_HISTORY_LIMIT,
     recentHistoryRetentionMinutes: DEFAULT_RECENT_HISTORY_RETENTION_MINUTES,
     unreadActiveWindowMinutes: DEFAULT_UNREAD_ACTIVE_WINDOW_MINUTES
@@ -39,9 +45,12 @@
   function createBackgroundCore({
     chromeApi,
     fetchImpl,
+    fetchRuntime: injectedFetchRuntime = null,
     logger = console,
     domain,
-    now = () => Date.now()
+    permissionsRuntime: injectedPermissionsRuntime = null,
+    now = () => Date.now(),
+    fetchTimeoutMs = DEFAULT_FETCH_TIMEOUT_MS
   }) {
     const {
       constants: DOMAIN_CONSTANTS,
@@ -50,13 +59,40 @@
       refreshRelativeTimes,
       mergePosts,
       trimRecentHistoryPosts,
+      isOpenRecruitment,
       isUnreadPostActive,
       extractLobbyLinkFromHtml,
-      isHelldiversListUrl
+      isHelldiversListUrl,
+      normalizeAuthorRecords,
+      normalizeAuthorBanOverlayMode,
+      normalizeConfirmBannedAuthorJoin,
+      createAuthorRecord,
+      createNicknameAuthorRecord,
+      normalizeAuthorNote,
+      getAuthorRecordMatchSummary
     } = domain;
 
     let cachedSettings = null;
     let settingsPromise = null;
+    let detectionPromise = null;
+    let settingsUpdateTail = Promise.resolve();
+    let unreadUpdateTail = Promise.resolve();
+    let recentPostsUpdateTail = Promise.resolve();
+    const activeFetchTimeoutMs = Number.isFinite(Number(fetchTimeoutMs)) && Number(fetchTimeoutMs) > 0
+      ? Number(fetchTimeoutMs)
+      : DEFAULT_FETCH_TIMEOUT_MS;
+    const fetchRuntime = injectedFetchRuntime
+      || global.SEAFFetch?.createFetchRuntime?.({
+        fetchImpl,
+        defaultTimeoutMs: activeFetchTimeoutMs,
+        timeoutErrorMessage: FETCH_TIMEOUT_ERROR
+      })
+      || null;
+    const permissionsRuntime = injectedPermissionsRuntime
+      || global.SEAFPermissions?.createPermissionsRuntime?.({
+        permissionsApi: chromeApi.permissions
+      })
+      || null;
 
     function clampToastDuration(value) {
       const numericValue = Number(value);
@@ -107,10 +143,29 @@
     }
 
     function normalizeSettings(savedSettings) {
+      const savedSettingsObject = savedSettings
+        && typeof savedSettings === 'object'
+        && !Array.isArray(savedSettings)
+        ? savedSettings
+        : {};
+      const canonicalAuthorRecords = Array.isArray(savedSettingsObject.authorRecords)
+        ? savedSettingsObject.authorRecords
+        : [];
+      const legacyAuthorBanRecords = (Array.isArray(savedSettingsObject.authorBanEntries)
+        ? savedSettingsObject.authorBanEntries
+        : [])
+        .map((record) => (
+          record && typeof record === 'object'
+            ? { ...record, status: 'banned' }
+            : record
+        ));
+      const authorRecordSource = [...canonicalAuthorRecords, ...legacyAuthorBanRecords];
       const normalizedSettings = {
         ...DEFAULT_SETTINGS,
-        ...savedSettings
+        ...savedSettingsObject
       };
+
+      delete normalizedSettings.authorBanEntries;
 
       if (
         savedSettings &&
@@ -122,6 +177,13 @@
 
       normalizedSettings.isDetectionActive = Boolean(normalizedSettings.isDetectionActive);
       normalizedSettings.isSiteAlertEnabled = Boolean(normalizedSettings.isSiteAlertEnabled);
+      normalizedSettings.confirmBannedAuthorJoin = normalizeConfirmBannedAuthorJoin(
+        normalizedSettings.confirmBannedAuthorJoin
+      );
+      normalizedSettings.authorRecords = normalizeAuthorRecords(authorRecordSource);
+      normalizedSettings.authorBanOverlayMode = normalizeAuthorBanOverlayMode(
+        normalizedSettings.authorBanOverlayMode
+      );
       normalizedSettings.pollingInterval = FIXED_POLLING_INTERVAL_SECONDS;
       normalizedSettings.toastDuration = clampToastDuration(normalizedSettings.toastDuration);
       normalizedSettings.recentHistoryLimit = clampRecentHistoryLimit(
@@ -177,6 +239,220 @@
       }
     }
 
+    function enqueueSettingsUpdate(update) {
+      const currentUpdate = settingsUpdateTail.then(update);
+      settingsUpdateTail = currentUpdate.catch(() => {});
+      return currentUpdate;
+    }
+
+    async function persistSettings(nextSettings) {
+      const normalizedSettings = normalizeSettings(nextSettings);
+      cachedSettings = normalizedSettings;
+      await chromeApi.storage.local.set({ [SETTINGS_KEY]: normalizedSettings });
+      return normalizedSettings;
+    }
+
+    async function finalizeSettingsUpdate(settings) {
+      await setupAlarm(settings);
+      await syncBadge(settings);
+      let surfaceState = await getLastSurfaceState();
+      if (
+        settings.isSiteAlertEnabled &&
+        surfaceState?.message === OPTIONAL_PERMISSION_REMOVED_MESSAGE
+      ) {
+        surfaceState = await setLastSurfaceState({
+          mode: 'normal',
+          message: '브라우저 알림 권한이 다시 활성화되었습니다.'
+        });
+      }
+
+      return {
+        success: true,
+        settings,
+        worker: buildWorkerStatus(settings, surfaceState)
+      };
+    }
+
+    function buildSettingsError(errorCode, settings, extra = {}) {
+      return {
+        success: false,
+        errorCode,
+        settings,
+        ...extra
+      };
+    }
+
+    async function getSettings() {
+      const settings = await ensureSettings();
+      return {
+        success: true,
+        settings,
+        worker: buildWorkerStatus(settings, await getLastSurfaceState())
+      };
+    }
+
+    function normalizeSettingsPatch(patch) {
+      if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
+        return {};
+      }
+
+      const allowedKeys = [
+        'isDetectionActive',
+        'isSiteAlertEnabled',
+        'toastDuration',
+        'authorBanOverlayMode',
+        'confirmBannedAuthorJoin',
+        'recentHistoryLimit',
+        'recentHistoryRetentionMinutes',
+        'unreadActiveWindowMinutes'
+      ];
+
+      return allowedKeys.reduce((nextPatch, key) => {
+        if (Object.prototype.hasOwnProperty.call(patch, key)) {
+          nextPatch[key] = patch[key];
+        }
+        return nextPatch;
+      }, {});
+    }
+
+    async function updateSettingsPatch(patch) {
+      return enqueueSettingsUpdate(async () => {
+        const settings = await ensureSettings();
+        const nextSettings = await persistSettings({
+          ...settings,
+          ...normalizeSettingsPatch(patch)
+        });
+        return finalizeSettingsUpdate(nextSettings);
+      });
+    }
+
+    function resolveAuthorRecord(input = {}) {
+      const status = input.status === 'banned' ? 'banned' : 'note';
+      if (input?.author && typeof input.author === 'object') {
+        return createAuthorRecord(input.author, input.note, status);
+      }
+
+      if (typeof input?.nickname === 'string' || typeof input?.label === 'string') {
+        return createNicknameAuthorRecord(input.nickname ?? input.label, input.note, status);
+      }
+
+      return null;
+    }
+
+    function normalizeAuthorRecordKeys(recordKeys) {
+      return [...new Set(
+        (Array.isArray(recordKeys) ? recordKeys : [])
+          .map((value) => String(value || ''))
+          .filter(Boolean)
+      )];
+    }
+
+    async function addAuthorRecord(input) {
+      return enqueueSettingsUpdate(async () => {
+        const settings = await ensureSettings();
+        const nextRecord = resolveAuthorRecord(input);
+        if (!nextRecord) {
+          return buildSettingsError('not-found', settings);
+        }
+        if (settings.authorRecords.some((record) => record.key === nextRecord.key)) {
+          return buildSettingsError('duplicate', settings);
+        }
+        if (settings.authorRecords.length >= DOMAIN_CONSTANTS.MAX_AUTHOR_RECORDS) {
+          return buildSettingsError('capacity', settings);
+        }
+
+        const nextSettings = await persistSettings({
+          ...settings,
+          authorRecords: [...settings.authorRecords, nextRecord]
+        });
+        return finalizeSettingsUpdate(nextSettings);
+      });
+    }
+
+    async function updateAuthorRecordNote(recordKey, note) {
+      return enqueueSettingsUpdate(async () => {
+        const settings = await ensureSettings();
+        const normalizedRecordKey = String(recordKey || '');
+        const matchingRecord = settings.authorRecords.find((record) => record.key === normalizedRecordKey);
+        if (!matchingRecord) {
+          return buildSettingsError('not-found', settings);
+        }
+
+        const normalizedNote = normalizeAuthorNote(note);
+        const nextSettings = await persistSettings({
+          ...settings,
+          authorRecords: settings.authorRecords.map((record) => {
+            if (record.key !== normalizedRecordKey) {
+              return record;
+            }
+
+            if (!normalizedNote) {
+              const { note: unusedNote, ...recordWithoutNote } = record;
+              return recordWithoutNote;
+            }
+
+            return { ...record, note: normalizedNote };
+          })
+        });
+        return finalizeSettingsUpdate(nextSettings);
+      });
+    }
+
+    async function setAuthorRecordStatus(recordKeys, status) {
+      return enqueueSettingsUpdate(async () => {
+        const settings = await ensureSettings();
+        const requestedKeys = normalizeAuthorRecordKeys(recordKeys);
+        if (status !== 'note' && status !== 'banned') {
+          return buildSettingsError('invalid-status', settings);
+        }
+        if (
+          requestedKeys.length === 0
+          || requestedKeys.some((key) => !settings.authorRecords.some((record) => record.key === key))
+        ) {
+          return buildSettingsError('not-found', settings);
+        }
+
+        const nextSettings = await persistSettings({
+          ...settings,
+          authorRecords: settings.authorRecords.map((record) => (
+            requestedKeys.includes(record.key)
+              ? { ...record, status }
+              : record
+          ))
+        });
+        return finalizeSettingsUpdate(nextSettings);
+      });
+    }
+
+    async function removeAuthorRecordKeys(recordKeys) {
+      return enqueueSettingsUpdate(async () => {
+        const settings = await ensureSettings();
+        const requestedKeys = normalizeAuthorRecordKeys(recordKeys);
+        const nextRecords = settings.authorRecords.filter((record) => !requestedKeys.includes(record.key));
+        if (nextRecords.length === settings.authorRecords.length) {
+          return buildSettingsError('not-found', settings);
+        }
+
+        const nextSettings = await persistSettings({
+          ...settings,
+          authorRecords: nextRecords
+        });
+        return finalizeSettingsUpdate(nextSettings);
+      });
+    }
+
+    function addAuthorBan(input = {}) {
+      return addAuthorRecord({ ...input, status: 'banned' });
+    }
+
+    function updateAuthorBanNote(entryKey, note) {
+      return updateAuthorRecordNote(entryKey, note);
+    }
+
+    function removeAuthorBanKeys(entryKeys) {
+      return removeAuthorRecordKeys(entryKeys);
+    }
+
     function handleStorageChanged(changes, areaName) {
       if (areaName !== 'local') {
         return;
@@ -191,6 +467,82 @@
           logger.warn('[SEAF] 배지 동기화 실패:', error);
         });
       }
+    }
+
+    async function disableSiteAlertsForMissingPermission(settings) {
+      let nextSettings = normalizeSettings({
+        ...settings,
+        isSiteAlertEnabled: false
+      });
+
+      if (settings.isSiteAlertEnabled) {
+        nextSettings = await persistSettings(nextSettings);
+      } else {
+        cachedSettings = nextSettings;
+      }
+
+      const surfaceState = await setLastSurfaceState({
+        mode: 'limited',
+        message: OPTIONAL_PERMISSION_REMOVED_MESSAGE
+      });
+
+      return { settings: nextSettings, surfaceState };
+    }
+
+    async function normalizeOptionalPermissionSettings(settings) {
+      if (
+        !settings.isSiteAlertEnabled
+        || !chromeApi.permissions?.contains
+        || !permissionsRuntime?.normalizeStoredSiteAlertSettings
+      ) {
+        return settings;
+      }
+
+      let permissionState = null;
+      try {
+        permissionState = await permissionsRuntime.normalizeStoredSiteAlertSettings(settings);
+      } catch (error) {
+        return settings;
+      }
+
+      if (!permissionState?.changed) {
+        return settings;
+      }
+
+      return enqueueSettingsUpdate(async () => {
+        const currentSettings = await ensureSettings({ forceRefresh: true });
+        if (!currentSettings.isSiteAlertEnabled) {
+          return currentSettings;
+        }
+
+        const result = await disableSiteAlertsForMissingPermission(currentSettings);
+        return result.settings;
+      });
+    }
+
+    async function handleOptionalPermissionsRemoved(permissions = {}) {
+      const removedOrigins = Array.isArray(permissions.origins) ? permissions.origins : [];
+      const optionalOrigins = permissionsRuntime?.origins || ['http://*/*', 'https://*/*'];
+      const removedOverlayPermission = removedOrigins.some((origin) => optionalOrigins.includes(origin));
+
+      if (!removedOverlayPermission) {
+        return { success: true, changed: false };
+      }
+
+      const update = await enqueueSettingsUpdate(async () => {
+        const settings = await ensureSettings({ forceRefresh: true });
+        const result = await disableSiteAlertsForMissingPermission(settings);
+        return { previousSettings: settings, ...result };
+      });
+      const { previousSettings, ...result } = update;
+      await syncBadge(result.settings);
+
+      return {
+        success: true,
+        changed: previousSettings.isSiteAlertEnabled,
+        settings: result.settings,
+        worker: buildWorkerStatus(result.settings, result.surfaceState)
+      };
     }
 
     async function setupAlarm(settings = null) {
@@ -222,32 +574,176 @@
       )].sort((left, right) => right - left);
     }
 
-    async function setUnreadPostIds(postIds) {
-      const normalizedIds = [...new Set(
+    function normalizeUnreadPostIds(postIds) {
+      return [...new Set(
         (Array.isArray(postIds) ? postIds : [])
           .map((value) => Number(value))
           .filter(Number.isFinite)
       )].sort((left, right) => right - left);
+    }
+
+    async function setUnreadPostIds(postIds) {
+      const normalizedIds = normalizeUnreadPostIds(postIds);
 
       await chromeApi.storage.local.set({ [UNREAD_POST_IDS_KEY]: normalizedIds });
       return normalizedIds;
     }
 
-    async function addUnreadPostIds(postIds) {
-      const currentIds = await getUnreadPostIds();
-      return setUnreadPostIds([...currentIds, ...postIds]);
+    function enqueueUnreadUpdate(update) {
+      const currentUpdate = unreadUpdateTail.then(update);
+      unreadUpdateTail = currentUpdate.catch(() => {});
+      return currentUpdate;
     }
 
-    async function markPostRead(postId) {
-      const normalizedPostId = Number(postId);
-      if (!Number.isFinite(normalizedPostId)) {
-        return { success: false, unreadIds: await getUnreadPostIds() };
+    function normalizePostOpenStates(storedStates) {
+      if (!storedStates || typeof storedStates !== 'object' || Array.isArray(storedStates)) {
+        return {};
       }
 
-      const unreadIds = await getUnreadPostIds();
-      const nextIds = unreadIds.filter((value) => value !== normalizedPostId);
-      await setUnreadPostIds(nextIds);
-      return { success: true, unreadIds: nextIds };
+      return Object.entries(storedStates).reduce((states, [postId, isOpen]) => {
+        const normalizedPostId = Number(postId);
+        if (Number.isFinite(normalizedPostId) && typeof isOpen === 'boolean') {
+          states[String(normalizedPostId)] = isOpen;
+        }
+        return states;
+      }, {});
+    }
+
+    function buildPostOpenStates(posts, currentTime) {
+      return (Array.isArray(posts) ? posts : []).reduce((states, post) => {
+        const postId = Number(post?.id);
+        if (Number.isFinite(postId)) {
+          states[String(postId)] = isOpenRecruitment(post, currentTime);
+        }
+        return states;
+      }, {});
+    }
+
+    function arePostOpenStatesEqual(leftStates, rightStates) {
+      const leftEntries = Object.entries(leftStates);
+      const rightEntries = Object.entries(rightStates);
+      return leftEntries.length === rightEntries.length && leftEntries.every(([postId, isOpen]) => (
+        rightStates[postId] === isOpen
+      ));
+    }
+
+    function mergePostOpenStates(previousStates, observedStates) {
+      return Object.fromEntries(
+        Object.entries({ ...previousStates, ...observedStates })
+          .sort(([leftPostId], [rightPostId]) => Number(rightPostId) - Number(leftPostId))
+          .slice(0, DOMAIN_CONSTANTS.LIVE_POST_LIMIT * 3)
+      );
+    }
+
+    function commitDetectedPostState(posts, currentTime) {
+      return enqueueUnreadUpdate(async () => {
+        const stored = await chromeApi.storage.local.get([
+          LAST_SEEN_KEY,
+          UNREAD_POST_IDS_KEY,
+          POST_OPEN_STATES_KEY
+        ]);
+        const lastSeenPostId = Number(stored[LAST_SEEN_KEY]) || null;
+        const previousOpenStates = normalizePostOpenStates(stored[POST_OPEN_STATES_KEY]);
+        const observedOpenStates = buildPostOpenStates(posts, currentTime);
+        const nextOpenStates = mergePostOpenStates(previousOpenStates, observedOpenStates);
+        const latestPostId = Math.max(
+          ...posts.map((post) => Number(post?.id)).filter(Number.isFinite)
+        );
+
+        if (!Number.isFinite(latestPostId)) {
+          return {
+            initialized: false,
+            alertPosts: [],
+            closedPostIds: [],
+            lastSeenPostId
+          };
+        }
+
+        if (lastSeenPostId === null) {
+          await chromeApi.storage.local.set({
+            [LAST_SEEN_KEY]: latestPostId,
+            [POST_OPEN_STATES_KEY]: observedOpenStates
+          });
+          return {
+            initialized: true,
+            alertPosts: [],
+            closedPostIds: [],
+            lastSeenPostId: latestPostId
+          };
+        }
+
+        const currentUnreadIds = normalizeUnreadPostIds(stored[UNREAD_POST_IDS_KEY]);
+        const alertPosts = posts.filter((post) => {
+          const postId = Number(post?.id);
+          const stateKey = String(postId);
+          const isOpen = observedOpenStates[stateKey] === true;
+          return isOpen && (
+            postId > lastSeenPostId || previousOpenStates[stateKey] === false
+          );
+        });
+        const currentUnreadIdSet = new Set(currentUnreadIds);
+        const closedPostIds = posts
+          .filter((post) => {
+            const stateKey = String(Number(post?.id));
+            return observedOpenStates[stateKey] === false && (
+              previousOpenStates[stateKey] === true || currentUnreadIdSet.has(Number(post?.id))
+            );
+          })
+          .map((post) => Number(post.id));
+        const closedPostIdSet = new Set(closedPostIds);
+        const nextUnreadIds = normalizeUnreadPostIds([
+          ...currentUnreadIds.filter((postId) => !closedPostIdSet.has(postId)),
+          ...alertPosts.map((post) => post.id)
+        ]);
+        const nextLastSeenPostId = Math.max(lastSeenPostId, latestPostId);
+        const storageUpdate = {};
+
+        if (nextLastSeenPostId !== lastSeenPostId) {
+          storageUpdate[LAST_SEEN_KEY] = nextLastSeenPostId;
+        }
+        if (!arePostOpenStatesEqual(previousOpenStates, nextOpenStates)) {
+          storageUpdate[POST_OPEN_STATES_KEY] = nextOpenStates;
+        }
+        if (
+          nextUnreadIds.length !== currentUnreadIds.length ||
+          nextUnreadIds.some((postId, index) => postId !== currentUnreadIds[index])
+        ) {
+          storageUpdate[UNREAD_POST_IDS_KEY] = nextUnreadIds;
+        }
+
+        if (Object.keys(storageUpdate).length > 0) {
+          await chromeApi.storage.local.set(storageUpdate);
+        }
+
+        return {
+          initialized: false,
+          alertPosts,
+          closedPostIds,
+          lastSeenPostId: nextLastSeenPostId
+        };
+      });
+    }
+
+    function addUnreadPostIds(postIds) {
+      return enqueueUnreadUpdate(async () => {
+        const currentIds = await getUnreadPostIds();
+        return setUnreadPostIds([...currentIds, ...postIds]);
+      });
+    }
+
+    function markPostRead(postId) {
+      const normalizedPostId = Number(postId);
+
+      return enqueueUnreadUpdate(async () => {
+        const unreadIds = await getUnreadPostIds();
+        if (!Number.isFinite(normalizedPostId)) {
+          return { success: false, unreadIds };
+        }
+
+        const nextIds = unreadIds.filter((value) => value !== normalizedPostId);
+        await setUnreadPostIds(nextIds);
+        return { success: true, unreadIds: nextIds };
+      });
     }
 
     async function getLastSurfaceState() {
@@ -290,6 +786,16 @@
       }
     }
 
+    async function syncBadgeAfterUnreadCommit(operationLabel) {
+      try {
+        await syncBadge();
+        return true;
+      } catch (error) {
+        logger.warn(`[SEAF] ${operationLabel} 완료 후 배지 동기화 실패:`, error);
+        return false;
+      }
+    }
+
     async function setLastScanAt(timestamp = now()) {
       await chromeApi.storage.local.set({ [LAST_SCAN_AT_KEY]: Number(timestamp) || now() });
     }
@@ -300,12 +806,14 @@
     }
 
     async function fetchText(url) {
-      const response = await fetchImpl(url, { cache: 'no-store' });
-      if (!response.ok) {
-        throw new Error(`요청 실패: ${response.status}`);
+      if (!fetchRuntime?.fetchText) {
+        throw new Error('fetch runtime is unavailable');
       }
 
-      return response.text();
+      return fetchRuntime.fetchText(url, {
+        timeoutMs: activeFetchTimeoutMs,
+        timeoutErrorMessage: FETCH_TIMEOUT_ERROR
+      });
     }
 
     async function fetchLivePosts(options = {}) {
@@ -321,15 +829,13 @@
       });
     }
 
-    function limitPopupPosts(posts) {
-      return filterRecentOpenPosts(posts, {
-        currentTime: now(),
-        limit: DOMAIN_CONSTANTS.POPUP_POST_LIMIT,
-        viewUrlPrefix: DOMAIN_CONSTANTS.VIEW_URL_PREFIX
-      });
+    function enqueueRecentPostsUpdate(update) {
+      const currentUpdate = recentPostsUpdateTail.then(update);
+      recentPostsUpdateTail = currentUpdate.catch(() => {});
+      return currentUpdate;
     }
 
-    async function getRecentPosts(settings = null) {
+    async function getRecentPostsOnce(settings = null) {
       const { [RECENT_POSTS_KEY]: storedPosts } = await chromeApi.storage.local.get([RECENT_POSTS_KEY]);
       if (!Array.isArray(storedPosts)) {
         return [];
@@ -348,6 +854,10 @@
       return trimmedPosts;
     }
 
+    function getRecentPosts(settings = null) {
+      return enqueueRecentPostsUpdate(() => getRecentPostsOnce(settings));
+    }
+
     function areStoredPostsEquivalent(leftPosts, rightPosts) {
       if (leftPosts.length !== rightPosts.length) {
         return false;
@@ -359,32 +869,35 @@
           Number(leftPost?.id) === Number(rightPost?.id) &&
           String(leftPost?.title || '') === String(rightPost?.title || '') &&
           String(leftPost?.subject || '') === String(rightPost?.subject || '') &&
+          JSON.stringify(leftPost?.author || null) === JSON.stringify(rightPost?.author || null) &&
           String(leftPost?.fullDateStr || '') === String(rightPost?.fullDateStr || '') &&
           String(leftPost?.postUrl || '') === String(rightPost?.postUrl || '')
         );
       });
     }
 
-    async function storeRecentPosts(posts, settings = null) {
+    function storeRecentPosts(posts, settings = null) {
       if (!Array.isArray(posts) || posts.length === 0) {
-        return;
+        return Promise.resolve();
       }
 
-      const resolvedSettings = settings || await ensureSettings();
-      const existingPosts = await getRecentPosts(resolvedSettings);
-      const mergedPosts = trimRecentHistoryPosts(
-        mergePosts(posts, existingPosts, {
-          currentTime: now(),
-          viewUrlPrefix: DOMAIN_CONSTANTS.VIEW_URL_PREFIX
-        }),
-        getRecentHistoryOptions(resolvedSettings)
-      );
+      return enqueueRecentPostsUpdate(async () => {
+        const resolvedSettings = settings || await ensureSettings();
+        const existingPosts = await getRecentPostsOnce(resolvedSettings);
+        const mergedPosts = trimRecentHistoryPosts(
+          mergePosts(posts, existingPosts, {
+            currentTime: now(),
+            viewUrlPrefix: DOMAIN_CONSTANTS.VIEW_URL_PREFIX
+          }),
+          getRecentHistoryOptions(resolvedSettings)
+        );
 
-      if (areStoredPostsEquivalent(existingPosts, mergedPosts)) {
-        return;
-      }
+        if (areStoredPostsEquivalent(existingPosts, mergedPosts)) {
+          return;
+        }
 
-      await chromeApi.storage.local.set({ [RECENT_POSTS_KEY]: mergedPosts });
+        await chromeApi.storage.local.set({ [RECENT_POSTS_KEY]: mergedPosts });
+      });
     }
 
     function buildWorkerStatus(settings, surfaceState = null, overrides = {}) {
@@ -403,11 +916,23 @@
     }
 
     function getOverlayPayload(post, settings, options = {}) {
+      const authorSummary = getAuthorRecordMatchSummary(
+        post?.author,
+        settings?.authorRecords ?? settings?.authorBanEntries
+      );
+
       return {
         postId: post.id,
         title: post.title,
         postUrl: post.postUrl,
         relativeTime: post.relativeTime,
+        author: post.author || null,
+        isBanned: authorSummary.isBanned,
+        hasAuthorNote: authorSummary.hasNote,
+        authorNote: authorSummary.note,
+        isBannedAuthor: authorSummary.isBanned,
+        authorBanNote: authorSummary.banNote,
+        confirmBannedAuthorJoin: settings.confirmBannedAuthorJoin !== false,
         toastDuration: settings.toastDuration * 1000,
         sourceLabel: options.sourceLabel || 'MANGHO 감지',
         isTest: Boolean(options.isTest)
@@ -442,7 +967,10 @@
 
       await chromeApi.scripting.executeScript({
         target: { tabId },
-        files: ['scripts/shared/seaf-overlay.js']
+        files: [
+          'scripts/shared/seaf-join-guard.js',
+          'scripts/shared/seaf-overlay.js'
+        ]
       });
     }
 
@@ -475,7 +1003,8 @@
     async function surfacePostInActiveTab(post, settings, options = {}) {
       const {
         activeTab: providedActiveTab = null,
-        persistState = true
+        persistState = true,
+        payload: providedPayload = null
       } = options;
       const activeTab = providedActiveTab || await getActiveTab();
       if (!activeTab?.id) {
@@ -492,7 +1021,7 @@
         };
       }
 
-      const payload = getOverlayPayload(post, settings);
+      const payload = providedPayload || getOverlayPayload(post, settings);
 
       try {
         if (isHelldiversListUrl(activeTab.url || '')) {
@@ -559,22 +1088,24 @@
         .slice(0, recentPosts.length);
     }
 
-    async function reconcileUnreadPosts(recentPosts, settings = null) {
-      const unreadIds = await getUnreadPostIds();
-      const unreadPosts = hydrateUnreadPosts(recentPosts, unreadIds, settings);
-      const visibleUnreadIds = unreadPosts.map((post) => Number(post.id)).filter(Number.isFinite);
+    function reconcileUnreadPosts(recentPosts, settings = null) {
+      return enqueueUnreadUpdate(async () => {
+        const unreadIds = await getUnreadPostIds();
+        const unreadPosts = hydrateUnreadPosts(recentPosts, unreadIds, settings);
+        const visibleUnreadIds = unreadPosts.map((post) => Number(post.id)).filter(Number.isFinite);
 
-      if (
-        visibleUnreadIds.length !== unreadIds.length ||
-        visibleUnreadIds.some((postId, index) => postId !== unreadIds[index])
-      ) {
-        await setUnreadPostIds(visibleUnreadIds);
-      }
+        if (
+          visibleUnreadIds.length !== unreadIds.length ||
+          visibleUnreadIds.some((postId, index) => postId !== unreadIds[index])
+        ) {
+          await setUnreadPostIds(visibleUnreadIds);
+        }
 
-      return {
-        unreadIds: visibleUnreadIds,
-        unreadPosts
-      };
+        return {
+          unreadIds: visibleUnreadIds,
+          unreadPosts
+        };
+      });
     }
 
     async function buildPopupPayload({ source, fallback = false, error = null }) {
@@ -624,7 +1155,7 @@
       }
     }
 
-    async function performDetection(settings = null) {
+    async function performDetectionOnce(settings = null) {
       const resolvedSettings = settings || await ensureSettings();
       if (!resolvedSettings.isDetectionActive) {
         return;
@@ -647,50 +1178,41 @@
         return;
       }
 
-      const { [LAST_SEEN_KEY]: storedLastSeenPostId } = await chromeApi.storage.local.get([LAST_SEEN_KEY]);
-      const lastSeenPostId = Number(storedLastSeenPostId) || null;
+      const detectionCommit = await commitDetectedPostState(posts, detectionTime);
+      await syncBadge(resolvedSettings);
 
-      if (lastSeenPostId === null) {
-        await chromeApi.storage.local.set({ [LAST_SEEN_KEY]: latestPostId });
-        await syncBadge(resolvedSettings);
+      if (detectionCommit.initialized) {
         logger.log(`[SEAF] 초기 lastSeenPostId 설정: ${latestPostId}`);
         return;
       }
 
-      const newPosts = filterRecentOpenPosts(posts, {
-        currentTime: detectionTime,
-        limit: DOMAIN_CONSTANTS.LIVE_POST_LIMIT,
-        viewUrlPrefix: DOMAIN_CONSTANTS.VIEW_URL_PREFIX
-      }).filter((post) => post.id > lastSeenPostId);
-
-      if (latestPostId > lastSeenPostId) {
-        await chromeApi.storage.local.set({ [LAST_SEEN_KEY]: latestPostId });
-      }
-
-      if (newPosts.length === 0) {
-        await syncBadge(resolvedSettings);
+      const alertPosts = detectionCommit.alertPosts;
+      if (alertPosts.length === 0) {
         return;
       }
-
-      await addUnreadPostIds(newPosts.map((post) => post.id));
-      await syncBadge(resolvedSettings);
 
       if (!resolvedSettings.isSiteAlertEnabled) {
         await setLastSurfaceState({
           mode: 'limited',
-          message: '브라우저 알림이 꺼져 있어 읽지 않은 모집만 배지와 팝업에 유지합니다.'
+          message: '브라우저 알림이 꺼져 있어 읽지 않은 모집은 팝업에만 유지합니다.'
         });
         return;
       }
 
       const activeTab = await getActiveTab();
-      const orderedPosts = [...newPosts].sort((left, right) => left.id - right.id);
+      const orderedPosts = [...alertPosts].sort((left, right) => left.id - right.id);
       let surfaceResult = null;
 
       for (const post of orderedPosts) {
+        const payload = getOverlayPayload(post, resolvedSettings);
+        if (payload.isBannedAuthor && resolvedSettings.authorBanOverlayMode === 'hide') {
+          continue;
+        }
+
         surfaceResult = await surfacePostInActiveTab(post, resolvedSettings, {
           activeTab,
-          persistState: false
+          persistState: false,
+          payload
         });
 
         if (!surfaceResult?.surfaced) {
@@ -706,6 +1228,24 @@
       }
     }
 
+    function performDetection(settings = null) {
+      if (detectionPromise) {
+        return detectionPromise;
+      }
+
+      const currentDetection = performDetectionOnce(settings);
+      detectionPromise = currentDetection;
+
+      const releaseDetection = () => {
+        if (detectionPromise === currentDetection) {
+          detectionPromise = null;
+        }
+      };
+
+      currentDetection.then(releaseDetection, releaseDetection);
+      return currentDetection;
+    }
+
     async function extractLobbyLink(postId) {
       const html = await fetchText(buildPostUrl(postId));
       return extractLobbyLinkFromHtml(html);
@@ -715,46 +1255,8 @@
       return `${DOMAIN_CONSTANTS.VIEW_URL_PREFIX}${postId}`;
     }
 
-    function getRuntimeUrl(path) {
-      if (chromeApi.runtime?.getURL) {
-        return chromeApi.runtime.getURL(path);
-      }
-
-      return path;
-    }
-
-    async function buildJoinHelperUrl(postId) {
-      const helperUrl = new URL(getRuntimeUrl(JOIN_HELPER_PATH));
-      const normalizedPostId = Number(postId);
-      helperUrl.searchParams.set('postId', String(normalizedPostId));
-      helperUrl.searchParams.set('postUrl', buildPostUrl(normalizedPostId));
-
-      try {
-        const link = await extractLobbyLink(normalizedPostId);
-        if (link) {
-          helperUrl.searchParams.set('lobbyLink', link);
-        } else {
-          helperUrl.searchParams.set('error', LOBBY_LINK_NOT_FOUND_ERROR);
-        }
-      } catch (error) {
-        helperUrl.searchParams.set('error', getErrorMessage(error));
-      }
-
-      return helperUrl.toString();
-    }
-
     async function openPostPage(postId) {
       return chromeApi.tabs.create({ url: buildPostUrl(postId) });
-    }
-
-    async function openJoinHelperTab(postId) {
-      const helperUrl = await buildJoinHelperUrl(postId);
-
-      try {
-        return await chromeApi.tabs.create({ url: helperUrl });
-      } catch (error) {
-        return openPostPage(postId);
-      }
     }
 
     async function joinPost(postId, sender) {
@@ -765,7 +1267,7 @@
       }
 
       await markPostRead(normalizedPostId);
-      await syncBadge();
+      await syncBadgeAfterUnreadCommit('참가 처리');
 
       if (sender.tab?.id) {
         try {
@@ -792,14 +1294,14 @@
 
     async function openPost(postId) {
       await markPostRead(postId);
-      await syncBadge();
+      await syncBadgeAfterUnreadCommit('게시글 열기');
       await openPostPage(postId);
       return { success: true, postId: Number(postId) };
     }
 
     async function markAllRead() {
-      await setUnreadPostIds([]);
-      await syncBadge();
+      await enqueueUnreadUpdate(() => setUnreadPostIds([]));
+      await syncBadgeAfterUnreadCommit('모두 읽음 처리');
       return { success: true, unreadCount: 0, unreadPostIds: [] };
     }
 
@@ -856,7 +1358,8 @@
     }
 
     async function initializeExtension() {
-      const settings = await ensureSettings({ forceRefresh: true });
+      let settings = await ensureSettings({ forceRefresh: true });
+      settings = await normalizeOptionalPermissionSettings(settings);
       await setupAlarm(settings);
       await syncBadge(settings);
       await performDetection(settings);
@@ -866,7 +1369,16 @@
       const settings = await ensureSettings({ forceRefresh: true });
       await setupAlarm(settings);
       await syncBadge(settings);
-      const surfaceState = await getLastSurfaceState();
+      let surfaceState = await getLastSurfaceState();
+      if (
+        settings.isSiteAlertEnabled &&
+        surfaceState?.message === OPTIONAL_PERMISSION_REMOVED_MESSAGE
+      ) {
+        surfaceState = await setLastSurfaceState({
+          mode: 'normal',
+          message: '브라우저 알림 권한이 활성화되었습니다.'
+        });
+      }
 
       return {
         success: true,
@@ -913,9 +1425,9 @@
       RECENT_POSTS_KEY,
       SETTINGS_KEY,
       UNREAD_POST_IDS_KEY,
+      POST_OPEN_STATES_KEY,
       LAST_SCAN_AT_KEY,
       LAST_SURFACE_STATE_KEY,
-      JOIN_HELPER_PATH,
       UNSUPPORTED_TEST_TAB_ERROR,
       LIST_PAGE_NOT_READY_ERROR,
       LOBBY_LINK_NOT_FOUND_ERROR,
@@ -925,7 +1437,18 @@
       clampUnreadActiveWindowMinutes,
       normalizeSettings,
       ensureSettings,
+      getSettings,
+      updateSettingsPatch,
+      addAuthorRecord,
+      updateAuthorRecordNote,
+      setAuthorRecordStatus,
+      removeAuthorRecordKeys,
+      addAuthorBan,
+      updateAuthorBanNote,
+      removeAuthorBanKeys,
       handleStorageChanged,
+      normalizeOptionalPermissionSettings,
+      handleOptionalPermissionsRemoved,
       setupAlarm,
       getUnreadPostIds,
       setUnreadPostIds,
@@ -935,7 +1458,6 @@
       buildWorkerStatus,
       fetchText,
       fetchLivePosts,
-      limitPopupPosts,
       getRecentPosts,
       areStoredPostsEquivalent,
       storeRecentPosts,
@@ -953,9 +1475,7 @@
       surfacePostInActiveTab,
       buildPostUrl,
       extractLobbyLink,
-      buildJoinHelperUrl,
       openPostPage,
-      openJoinHelperTab,
       joinPost,
       openPost,
       markAllRead,

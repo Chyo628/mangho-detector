@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 
 const domain = require('../scripts/shared/seaf-domain.js');
 const { createPopupCore } = require('../scripts/shared/seaf-popup-core.js');
+const { createSettingsClient } = require('../popup/settings-client.js');
 const { createFakeChrome } = require('./helpers/fake-chrome');
 const { buildListHtml } = require('./helpers/build-list-html');
 
@@ -29,7 +30,8 @@ function createCore(options = {}) {
     chromeApi: fake.chromeApi,
     fetchImpl: options.fetchImpl || createFetchOk(buildListHtml([])),
     domain,
-    now: () => NOW
+    now: () => NOW,
+    fetchTimeoutMs: options.fetchTimeoutMs
   });
 
   return { core, fake };
@@ -51,16 +53,139 @@ test('normalizeSettings keeps polling fixed and clamps toast/history settings', 
     isSiteAlertEnabled: true,
     recentHistoryLimit: 30,
     recentHistoryRetentionMinutes: 5,
-    unreadActiveWindowMinutes: 180
+    unreadActiveWindowMinutes: 180,
+    authorRecords: [],
+    authorBanOverlayMode: 'warn',
+    confirmBannedAuthorJoin: true
   });
   assert.equal(core.normalizeToastDuration(1), 3);
   assert.equal(core.normalizeRecentHistoryLimit(0), 1);
   assert.equal(core.normalizeRecentHistoryRetentionMinutes(999), 180);
   assert.equal(core.normalizeSettings({}).unreadActiveWindowMinutes, 15);
   assert.equal(core.normalizeSettings({ unreadActiveWindowMinutes: 0 }).unreadActiveWindowMinutes, 1);
+  assert.equal(core.normalizeSettings({ confirmBannedAuthorJoin: false }).confirmBannedAuthorJoin, false);
 });
 
-test('getStoredRecentPosts trims stored history by count and age and persists the trimmed cache', async () => {
+test('normalizeSettings migrates legacy bans into canonical author records', () => {
+  const { core } = createCore();
+  const alphaEntry = domain.createNicknameAuthorBanEntry('Alpha');
+
+  const normalized = core.normalizeSettings({
+    authorBanEntries: [
+      null,
+      alphaEntry,
+      { ...alphaEntry },
+      { displayName: 'Missing key' }
+    ],
+    authorBanOverlayMode: 'unexpected'
+  });
+
+  assert.equal(normalized.authorRecords.length, 1);
+  assert.deepEqual(normalized.authorRecords[0], alphaEntry);
+  assert.equal(Object.hasOwn(normalized, 'authorBanEntries'), false);
+  assert.equal(normalized.authorBanOverlayMode, 'warn');
+
+  const emptyCanonicalMergesLegacy = core.normalizeSettings({
+    authorRecords: [],
+    authorBanEntries: [alphaEntry]
+  });
+  assert.deepEqual(emptyCanonicalMergesLegacy.authorRecords, [alphaEntry]);
+
+  const canonicalNote = domain.createNicknameAuthorRecord('Alpha', 'trusted', 'note');
+  const sameKeyCanonicalWins = core.normalizeSettings({
+    authorRecords: [canonicalNote],
+    authorBanEntries: [alphaEntry]
+  });
+  assert.deepEqual(sameKeyCanonicalWins.authorRecords, [canonicalNote]);
+
+  const betaLegacyBan = domain.createNicknameAuthorBanEntry('Beta', 'warning');
+  const uniqueLegacyIsPreserved = core.normalizeSettings({
+    authorRecords: [canonicalNote],
+    authorBanEntries: [alphaEntry, betaLegacyBan]
+  });
+  assert.deepEqual(uniqueLegacyIsPreserved.authorRecords, [canonicalNote, betaLegacyBan]);
+  assert.equal(Object.hasOwn(uniqueLegacyIsPreserved, 'authorBanEntries'), false);
+
+  const fullCanonicalRecords = Array.from(
+    { length: domain.constants.MAX_AUTHOR_RECORDS },
+    (_, index) => domain.createNicknameAuthorRecord(`Canonical ${index}`, '', 'note')
+  );
+  const duplicateLegacyBan = domain.createNicknameAuthorBanEntry('Canonical 0', 'stale warning');
+  const uniqueOverflowBan = domain.createNicknameAuthorBanEntry('Legacy overflow', 'preserve me');
+  const overCapacityMigration = core.normalizeSettings({
+    authorRecords: fullCanonicalRecords,
+    authorBanEntries: [duplicateLegacyBan, uniqueOverflowBan]
+  });
+
+  assert.equal(overCapacityMigration.authorRecords.length, domain.constants.MAX_AUTHOR_RECORDS + 1);
+  assert.deepEqual(overCapacityMigration.authorRecords[0], fullCanonicalRecords[0]);
+  assert.deepEqual(overCapacityMigration.authorRecords.at(-1), uniqueOverflowBan);
+  assert.equal(Object.hasOwn(overCapacityMigration, 'authorBanEntries'), false);
+});
+
+test('settings client exposes generic author record mutations and keeps ban wrappers compatible', async () => {
+  const sentMessages = [];
+  const normalizedSettings = { authorRecords: [] };
+  const client = createSettingsClient({
+    chromeApi: {
+      runtime: {
+        async sendMessage(message) {
+          sentMessages.push(message);
+          return { success: true, settings: normalizedSettings };
+        }
+      }
+    },
+    popupCore: {
+      normalizeSettings(settings) {
+        return settings;
+      }
+    }
+  });
+
+  assert.equal(await client.addAuthorRecord({ nickname: 'Alpha', note: 'memo', status: 'note' }), normalizedSettings);
+  await client.updateAuthorRecordNote('nickname:Alpha', 'updated');
+  await client.setAuthorRecordStatus(['nickname:Alpha'], 'banned');
+  await client.removeAuthorRecordKeys(['nickname:Alpha']);
+  await client.addAuthorBan({ nickname: 'Legacy', note: 'warning' });
+
+  assert.deepEqual(sentMessages, [
+    {
+      type: 'ADD_AUTHOR_RECORD',
+      author: null,
+      nickname: 'Alpha',
+      note: 'memo',
+      status: 'note'
+    },
+    { type: 'UPDATE_AUTHOR_RECORD_NOTE', key: 'nickname:Alpha', note: 'updated' },
+    { type: 'SET_AUTHOR_RECORD_STATUS', keys: ['nickname:Alpha'], status: 'banned' },
+    { type: 'REMOVE_AUTHOR_RECORD_KEYS', keys: ['nickname:Alpha'] },
+    {
+      type: 'ADD_AUTHOR_RECORD',
+      author: null,
+      nickname: 'Legacy',
+      note: 'warning',
+      status: 'banned'
+    }
+  ]);
+});
+
+test('fetchText aborts a pending popup fallback request after its timeout', async () => {
+  let wasAborted = false;
+  const { core } = createCore({
+    fetchTimeoutMs: 5,
+    fetchImpl(url, options) {
+      options.signal.addEventListener('abort', () => {
+        wasAborted = true;
+      });
+      return new Promise(() => {});
+    }
+  });
+
+  await assert.rejects(core.fetchText('https://example.com/pending'), /Request timed out\./);
+  assert.equal(wasAborted, true);
+});
+
+test('getStoredRecentPosts trims stored history for display without rewriting the cache', async () => {
   const { core, fake } = createCore({
     chromeOptions: {
       storageData: {
@@ -100,10 +225,10 @@ test('getStoredRecentPosts trims stored history by count and age and persists th
   }));
 
   assert.deepEqual(recentPosts.map((post) => post.id), [53, 52]);
-  assert.deepEqual(fake.state.storageData.seaf_recent_posts.map((post) => post.id), [53, 52]);
+  assert.deepEqual(fake.state.storageData.seaf_recent_posts.map((post) => post.id), [53, 52, 51]);
 });
 
-test('fetchPopupPostsDirectly updates recent-post cache and hydrates unread posts', async () => {
+test('fetchPopupPostsDirectly hydrates display data without writing recent or unread storage', async () => {
   const html = buildListHtml([
     { id: 51, title: '\uD31D\uC5C5 \uBAA8\uC9D1', fullDateStr: '2026-03-09 10:04:00' }
   ]);
@@ -121,7 +246,8 @@ test('fetchPopupPostsDirectly updates recent-post cache and hydrates unread post
   assert.equal(response.success, true);
   assert.equal(response.source, 'popup-fetch');
   assert.equal(response.unreadPosts[0].id, 51);
-  assert.ok(Array.isArray(fake.state.storageData.seaf_recent_posts));
+  assert.equal(fake.state.storageData.seaf_recent_posts, undefined);
+  assert.deepEqual(fake.state.storageData.seaf_unread_post_ids, [51]);
 });
 
 test('fetchPopupPostsDirectly decodes numeric entities in fetched titles', async () => {
@@ -145,7 +271,7 @@ test('fetchPopupPostsDirectly decodes numeric entities in fetched titles', async
   const response = await core.fetchPopupPostsDirectly();
 
   assert.equal(response.unreadPosts[0].title, expectedTitle);
-  assert.equal(fake.state.storageData.seaf_recent_posts[0].title, expectedTitle);
+  assert.equal(fake.state.storageData.seaf_recent_posts, undefined);
 });
 
 test('fetchPopupPostsWithFallback returns cached posts when direct fetch fails', async () => {
@@ -200,7 +326,7 @@ test('fetchPopupPostsWithFallback decodes numeric entities in cached titles', as
   assert.equal(response.unreadPosts[0].title, '\u267f\u267f\u267f \uC77C\uC7A5\uC5F0 10 \u267f\u267f\u267f');
 });
 
-test('reconcileUnreadPosts keeps older retained posts in history but removes them from unread after unreadActiveWindowMinutes', async () => {
+test('reconcileUnreadPosts filters stale ids for display without rewriting unread storage', async () => {
   const { core, fake } = createCore({
     chromeOptions: {
       storageData: {
@@ -242,30 +368,7 @@ test('reconcileUnreadPosts keeps older retained posts in history but removes the
 
   assert.deepEqual(historyPosts.map((post) => post.id), [64, 63]);
   assert.deepEqual(response.unreadPosts.map((post) => post.id), [64]);
-  assert.deepEqual(fake.state.storageData.seaf_unread_post_ids, [64]);
-});
-
-test('areStoredPostsEquivalent ignores detectedAt-only changes', () => {
-  const { core } = createCore();
-  const left = [{ id: 1, title: 'a', subject: '\uD5EC\uB9DD\uD638', fullDateStr: '', postUrl: 'u', detectedAt: 1 }];
-  const right = [{ id: 1, title: 'a', subject: '\uD5EC\uB9DD\uD638', fullDateStr: '', postUrl: 'u', detectedAt: 5 }];
-
-  assert.equal(core.areStoredPostsEquivalent(left, right), true);
-});
-
-test('markPostRead removes ids from unread storage', async () => {
-  const { core, fake } = createCore({
-    chromeOptions: {
-      storageData: {
-        seaf_unread_post_ids: [3, 2, 1]
-      }
-    }
-  });
-
-  const unreadIds = await core.markPostRead(2);
-
-  assert.deepEqual(unreadIds, [3, 1]);
-  assert.deepEqual(fake.state.storageData.seaf_unread_post_ids, [3, 1]);
+  assert.deepEqual(fake.state.storageData.seaf_unread_post_ids, [64, 63]);
 });
 
 test('triggerTestToastDirectly rejects unsupported tabs', async () => {
@@ -305,7 +408,10 @@ test('triggerTestToastDirectly injects overlay into a generic active tab', async
 
   assert.deepEqual(response, { success: true, source: 'popup-test' });
   assert.equal(fake.state.executedScripts.length, 2);
-  assert.deepEqual(fake.state.executedScripts[0].files, ['scripts/shared/seaf-overlay.js']);
+  assert.deepEqual(fake.state.executedScripts[0].files, [
+    'scripts/shared/seaf-join-guard.js',
+    'scripts/shared/seaf-overlay.js'
+  ]);
   assert.equal(typeof fake.state.executedScripts[1].func, 'function');
 });
 
