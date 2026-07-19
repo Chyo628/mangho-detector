@@ -8,15 +8,6 @@ function createEvent() {
   };
 }
 
-async function emitAsync(listeners, ...args) {
-  for (const listener of listeners) {
-    const result = listener(...args);
-    if (result && typeof result.then === 'function') {
-      await result;
-    }
-  }
-}
-
 function createFakeChrome(options = {}) {
   const state = {
     storageData: { ...(options.storageData || {}) },
@@ -26,12 +17,14 @@ function createFakeChrome(options = {}) {
     alarmsCreated: [],
     alarmsCleared: [],
     runtimeSentMessages: [],
-    notificationsCreated: [],
-    notificationsCleared: [],
     badgeTexts: [],
     badgeBackgroundColors: [],
     actionTitles: [],
-    executedScripts: []
+    executedScripts: [],
+    grantedOrigins: new Set(options.grantedOrigins || []),
+    permissionContainsChecks: [],
+    permissionRequests: [],
+    permissionRemovals: []
   };
 
   const storageChangedEvent = createEvent();
@@ -39,8 +32,6 @@ function createFakeChrome(options = {}) {
   const runtimeInstalledEvent = createEvent();
   const runtimeStartupEvent = createEvent();
   const alarmsEvent = createEvent();
-  const notificationClickedEvent = createEvent();
-  const notificationButtonClickedEvent = createEvent();
 
   const chromeApi = {
     storage: {
@@ -121,38 +112,6 @@ function createFakeChrome(options = {}) {
       },
       onAlarm: alarmsEvent
     },
-    notifications: {
-      async create(notificationId, optionsData) {
-        let resolvedNotificationId = notificationId;
-        let resolvedOptions = optionsData;
-
-        if (typeof optionsData === 'undefined') {
-          resolvedOptions = notificationId;
-          resolvedNotificationId = `notification-${state.notificationsCreated.length + 1}`;
-        }
-
-        state.notificationsCreated.push({
-          notificationId: resolvedNotificationId,
-          options: resolvedOptions
-        });
-
-        if (options.createNotification) {
-          return options.createNotification(resolvedNotificationId, resolvedOptions, state);
-        }
-
-        return resolvedNotificationId;
-      },
-      async clear(notificationId) {
-        state.notificationsCleared.push(notificationId);
-        if (options.clearNotification) {
-          return options.clearNotification(notificationId, state);
-        }
-
-        return true;
-      },
-      onClicked: notificationClickedEvent,
-      onButtonClicked: notificationButtonClickedEvent
-    },
     action: {
       async setBadgeText(details) {
         state.badgeTexts.push(details);
@@ -181,6 +140,40 @@ function createFakeChrome(options = {}) {
         }
 
         return [];
+      }
+    },
+    permissions: {
+      async contains(permissions) {
+        state.permissionContainsChecks.push(permissions);
+        if (options.permissionsContains) {
+          return options.permissionsContains(permissions, state);
+        }
+
+        return (permissions?.origins || []).every((origin) => state.grantedOrigins.has(origin));
+      },
+      async request(permissions) {
+        state.permissionRequests.push(permissions);
+        const granted = options.requestPermissions
+          ? await options.requestPermissions(permissions, state)
+          : true;
+
+        if (granted) {
+          (permissions?.origins || []).forEach((origin) => state.grantedOrigins.add(origin));
+        }
+
+        return Boolean(granted);
+      },
+      async remove(permissions) {
+        state.permissionRemovals.push(permissions);
+        const removed = options.removePermissions
+          ? await options.removePermissions(permissions, state)
+          : true;
+
+        if (removed) {
+          (permissions?.origins || []).forEach((origin) => state.grantedOrigins.delete(origin));
+        }
+
+        return Boolean(removed);
       }
     },
     runtime: {
@@ -225,12 +218,6 @@ function createFakeChrome(options = {}) {
       }
 
       return responses;
-    },
-    async emitNotificationClick(notificationId) {
-      await emitAsync(notificationClickedEvent.listeners, notificationId);
-    },
-    async emitNotificationButtonClick(notificationId, buttonIndex) {
-      await emitAsync(notificationButtonClickedEvent.listeners, notificationId, buttonIndex);
     }
   };
 }
