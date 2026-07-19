@@ -47,7 +47,7 @@
     </header>
 
     <main class="seaf-main">
-      <section class="seaf-summary-panel" id="seaf-worker-status-card" data-mode="checking">
+      <section class="seaf-summary-panel">
         <div class="seaf-summary-head">
           <div class="seaf-summary-copy">
             <p class="seaf-eyebrow">System status</p>
@@ -65,7 +65,7 @@
             <strong class="seaf-stat-value" id="seaf-unread-count">0</strong>
           </div>
           <div class="seaf-stat">
-            <span class="seaf-stat-label">마지막 스캔</span>
+            <span class="seaf-stat-label">마지막 확인</span>
             <strong class="seaf-stat-value" id="seaf-last-scan-value">대기 중</strong>
           </div>
           <div class="seaf-stat">
@@ -90,7 +90,7 @@
         <div class="seaf-panel-head">
           <div>
             <p class="seaf-panel-title">최근 감지 기록</p>
-            <p class="seaf-panel-copy">최근에 확인한 모집과 저장된 기록을 함께 보여줍니다.</p>
+            <p class="seaf-panel-copy">최근에 확인한 모집과 닫힌 기록까지 함께 보여줍니다.</p>
           </div>
           <div class="seaf-panel-tools">
             <div class="seaf-panel-count" id="seaf-history-count">0</div>
@@ -115,7 +115,13 @@
 
       <section class="seaf-status-row" aria-live="polite">
         <div class="seaf-save-status" id="seaf-save-status"></div>
+        <div class="seaf-save-status" id="seaf-permission-status" role="status"></div>
         <div class="seaf-loading-status" id="seaf-loading-status"></div>
+      </section>
+
+      <section class="seaf-author-undo" id="seaf-author-record-undo" role="status" hidden>
+        <span id="seaf-author-record-undo-message"></span>
+        <button type="button" id="seaf-author-record-undo-button" class="seaf-secondary-button">실행 취소</button>
       </section>
 
       <section class="seaf-settings-panel" id="seaf-settings-panel" data-collapsed="false">
@@ -243,13 +249,212 @@
               <span class="seaf-input-suffix">분</span>
             </span>
           </label>
+
+        </div>
+      </section>
+
+      <section
+        class="seaf-panel seaf-author-ban-panel"
+        id="seaf-author-ban-panel"
+        data-list-collapsed="false"
+        aria-labelledby="seaf-author-ban-title"
+      >
+        <div class="seaf-panel-head">
+          <div>
+            <p class="seaf-panel-title" id="seaf-author-ban-title">밴 목록</p>
+            <p class="seaf-panel-copy">주의할 글쓴이를 관리하고 배너 표시 방식을 정합니다.</p>
+          </div>
+          <div class="seaf-panel-count" id="seaf-author-ban-count">0개</div>
+        </div>
+
+        <div class="seaf-author-ban-controls">
+          <div class="seaf-author-ban-mode" role="radiogroup" aria-label="밴 알림 방식">
+            <label class="seaf-choice-chip" for="seaf-author-ban-mode-warn">
+              <input type="radio" name="seaf-author-ban-mode" id="seaf-author-ban-mode-warn" value="warn">
+              <span>경고 배너 표시</span>
+            </label>
+            <label class="seaf-choice-chip" for="seaf-author-ban-mode-hide">
+              <input type="radio" name="seaf-author-ban-mode" id="seaf-author-ban-mode-hide" value="hide">
+              <span>배너 숨기기</span>
+            </label>
+          </div>
+
+          <p class="seaf-author-ban-policy-copy">밴 글도 기록에는 남으며, 오버레이 배너만 경고 표시하거나 숨깁니다.</p>
+
+          <label class="seaf-setting-row seaf-author-ban-confirm-setting" for="seaf-author-ban-join-confirm-toggle">
+            <span class="seaf-setting-copy">
+              <span class="seaf-setting-title">밴 글쓴이 참가 전 확인</span>
+              <span class="seaf-setting-description">참가하기 전에 저장한 메모와 경고를 한 번 더 보여줍니다.</span>
+            </span>
+            <span class="seaf-toggle">
+              <input type="checkbox" id="seaf-author-ban-join-confirm-toggle">
+              <span class="seaf-toggle-track" aria-hidden="true"></span>
+            </span>
+          </label>
+
+          <div class="seaf-author-ban-compose">
+            <div class="seaf-author-ban-compose-fields">
+              <input
+                type="text"
+                id="seaf-author-ban-input"
+                class="seaf-text-input"
+                placeholder="닉네임"
+                aria-label="밴할 글쓴이 닉네임"
+                autocomplete="off"
+                maxlength="80"
+              >
+              <input
+                type="text"
+                id="seaf-author-ban-note-input"
+                class="seaf-text-input"
+                placeholder="메모 (선택, 예: 폭격 유도)"
+                aria-label="밴 메모"
+                autocomplete="off"
+                maxlength="240"
+              >
+            </div>
+            <button type="button" id="seaf-author-ban-add-button" class="seaf-action-button">추가</button>
+          </div>
+        </div>
+
+        <div class="seaf-author-ban-roster">
+          <div class="seaf-author-ban-roster-head">
+            <div>
+              <p class="seaf-author-ban-roster-title">명단</p>
+              <p class="seaf-author-ban-roster-copy">등록된 대상을 검색하거나 한꺼번에 정리합니다.</p>
+            </div>
+            <button
+              type="button"
+              id="seaf-author-ban-list-toggle-button"
+              class="seaf-panel-toggle"
+              aria-expanded="true"
+              aria-controls="seaf-author-ban-roster-body"
+            >
+              접기
+            </button>
+          </div>
+
+          <div class="seaf-author-ban-roster-body" id="seaf-author-ban-roster-body">
+            <div class="seaf-author-ban-tools">
+              <input
+                type="search"
+                id="seaf-author-ban-search-input"
+                class="seaf-text-input seaf-text-input-search"
+                placeholder="밴 목록 검색"
+                aria-label="밴 목록 검색"
+                autocomplete="off"
+              >
+              <label class="seaf-inline-check" for="seaf-author-ban-select-visible">
+                <input type="checkbox" id="seaf-author-ban-select-visible">
+                <span>검색 결과 전체 선택</span>
+              </label>
+            </div>
+
+            <div class="seaf-author-ban-actions">
+              <button type="button" id="seaf-author-ban-move-selected-button" class="seaf-secondary-button">메모로 전환</button>
+              <button type="button" id="seaf-author-ban-delete-selected-button" class="seaf-secondary-button">선택 삭제</button>
+              <button type="button" id="seaf-author-ban-clear-all-button" class="seaf-secondary-button seaf-danger-button">전체 삭제</button>
+            </div>
+
+            <div class="seaf-author-ban-list" id="seaf-author-ban-list" aria-live="polite"></div>
+          </div>
+        </div>
+      </section>
+
+      <section
+        class="seaf-panel seaf-author-record-panel seaf-author-note-panel"
+        id="seaf-author-note-panel"
+        data-list-collapsed="false"
+        aria-labelledby="seaf-author-note-title"
+      >
+        <div class="seaf-panel-head">
+          <div>
+            <p class="seaf-panel-title" id="seaf-author-note-title">글쓴이 메모</p>
+            <p class="seaf-panel-copy">밴하지 않은 글쓴이에 대한 메모를 저장하고 필요할 때 밴으로 전환합니다.</p>
+          </div>
+          <div class="seaf-panel-count" id="seaf-author-note-count">0개</div>
+        </div>
+
+        <div class="seaf-author-record-controls">
+          <div class="seaf-author-record-compose">
+            <div class="seaf-author-record-compose-fields">
+              <input
+                type="text"
+                id="seaf-author-note-input"
+                class="seaf-text-input"
+                placeholder="닉네임"
+                aria-label="메모할 글쓴이 닉네임"
+                autocomplete="off"
+                maxlength="80"
+              >
+              <input
+                type="text"
+                id="seaf-author-note-note-input"
+                class="seaf-text-input"
+                placeholder="메모 (필수)"
+                aria-label="글쓴이 메모"
+                autocomplete="off"
+                maxlength="240"
+              >
+            </div>
+            <button type="button" id="seaf-author-note-add-button" class="seaf-action-button">추가</button>
+          </div>
+        </div>
+
+        <div class="seaf-author-record-roster">
+          <div class="seaf-author-record-roster-head">
+            <div>
+              <p class="seaf-author-record-roster-title">명단</p>
+              <p class="seaf-author-record-roster-copy">검색 결과를 선택해 밴 목록으로 옮기거나 한꺼번에 정리합니다.</p>
+            </div>
+            <button
+              type="button"
+              id="seaf-author-note-list-toggle-button"
+              class="seaf-panel-toggle"
+              aria-expanded="true"
+              aria-controls="seaf-author-note-roster-body"
+            >
+              접기
+            </button>
+          </div>
+
+          <div class="seaf-author-record-roster-body" id="seaf-author-note-roster-body">
+            <div class="seaf-author-record-tools">
+              <input
+                type="search"
+                id="seaf-author-note-search-input"
+                class="seaf-text-input seaf-text-input-search"
+                placeholder="글쓴이 메모 검색"
+                aria-label="글쓴이 메모 검색"
+                autocomplete="off"
+              >
+              <label class="seaf-inline-check" for="seaf-author-note-select-visible">
+                <input type="checkbox" id="seaf-author-note-select-visible">
+                <span>검색 결과 전체 선택</span>
+              </label>
+            </div>
+
+            <div class="seaf-author-record-actions">
+              <button type="button" id="seaf-author-note-move-selected-button" class="seaf-secondary-button">밴으로 전환</button>
+              <button type="button" id="seaf-author-note-delete-selected-button" class="seaf-secondary-button">선택 삭제</button>
+              <button type="button" id="seaf-author-note-clear-all-button" class="seaf-secondary-button seaf-danger-button">전체 삭제</button>
+            </div>
+
+            <div class="seaf-author-record-list" id="seaf-author-note-list" aria-live="polite"></div>
+          </div>
         </div>
       </section>
     </main>
   </div>
 
   <script src="../scripts/shared/seaf-domain.js"></script>
+  <script src="../scripts/shared/seaf-fetch.js"></script>
+  <script src="../scripts/shared/seaf-permissions.js"></script>
+  <script src="../scripts/shared/seaf-join-guard.js"></script>
   <script src="../scripts/shared/seaf-popup-core.js"></script>
+  <script src="settings-client.js"></script>
+  <script src="permissions-controller.js"></script>
+  <script src="confirm-panels.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

@@ -12,6 +12,9 @@
   const DEFAULT_UNREAD_ACTIVE_WINDOW_MINUTES = 15;
   const MIN_UNREAD_ACTIVE_WINDOW_MINUTES = 1;
   const MAX_UNREAD_ACTIVE_WINDOW_MINUTES = 180;
+  const DEFAULT_AUTHOR_BAN_OVERLAY_MODE = 'warn';
+  const DEFAULT_CONFIRM_BANNED_AUTHOR_JOIN = true;
+  const DEFAULT_FETCH_TIMEOUT_MS = 10000;
   const DEFAULT_SETTINGS = {
     isDetectionActive: true,
     pollingInterval: FIXED_POLLING_INTERVAL_SECONDS,
@@ -19,7 +22,10 @@
     isSiteAlertEnabled: true,
     recentHistoryLimit: DEFAULT_RECENT_HISTORY_LIMIT,
     recentHistoryRetentionMinutes: DEFAULT_RECENT_HISTORY_RETENTION_MINUTES,
-    unreadActiveWindowMinutes: DEFAULT_UNREAD_ACTIVE_WINDOW_MINUTES
+    unreadActiveWindowMinutes: DEFAULT_UNREAD_ACTIVE_WINDOW_MINUTES,
+    authorRecords: [],
+    authorBanOverlayMode: DEFAULT_AUTHOR_BAN_OVERLAY_MODE,
+    confirmBannedAuthorJoin: DEFAULT_CONFIRM_BANNED_AUTHOR_JOIN
   };
   const RECENT_POSTS_KEY = 'seaf_recent_posts';
   const UNREAD_POST_IDS_KEY = 'seaf_unread_post_ids';
@@ -30,7 +36,9 @@
     chromeApi,
     fetchImpl,
     domain,
-    now = () => Date.now()
+    now = () => Date.now(),
+    fetchTimeoutMs = DEFAULT_FETCH_TIMEOUT_MS,
+    fetchRuntime = null
   }) {
     const {
       constants: DOMAIN_CONSTANTS,
@@ -40,8 +48,21 @@
       mergePosts,
       trimRecentHistoryPosts,
       isUnreadPostActive,
-      isHelldiversListUrl
+      isHelldiversListUrl,
+      normalizeAuthorRecords: normalizeDomainAuthorRecords,
+      normalizeAuthorBanEntries: normalizeDomainAuthorBanEntries,
+      normalizeAuthorBanOverlayMode: normalizeDomainAuthorBanOverlayMode,
+      normalizeConfirmBannedAuthorJoin: normalizeDomainConfirmBannedAuthorJoin
     } = domain;
+    const fetchModule = global.SEAFFetch
+      || (typeof module !== 'undefined' && module.exports ? require('./seaf-fetch.js') : null);
+    const activeFetchRuntime = fetchRuntime || fetchModule?.createFetchRuntime({
+      fetchImpl,
+      defaultTimeoutMs: fetchTimeoutMs
+    });
+    if (!activeFetchRuntime?.fetchText) {
+      throw new Error('A shared fetch runtime is required.');
+    }
 
     function normalizeToastDuration(value) {
       const numericValue = Number(value);
@@ -91,11 +112,46 @@
       );
     }
 
+    function normalizeAuthorBanOverlayMode(value) {
+      return normalizeDomainAuthorBanOverlayMode(value);
+    }
+
+    function normalizeConfirmBannedAuthorJoin(value) {
+      return normalizeDomainConfirmBannedAuthorJoin(value);
+    }
+
+    function normalizeAuthorBanEntries(entries) {
+      return normalizeDomainAuthorBanEntries(entries);
+    }
+
+    function normalizeAuthorRecords(records) {
+      return normalizeDomainAuthorRecords(records);
+    }
+
     function normalizeSettings(savedSettings) {
+      const savedSettingsObject = savedSettings
+        && typeof savedSettings === 'object'
+        && !Array.isArray(savedSettings)
+        ? savedSettings
+        : {};
+      const canonicalAuthorRecords = Array.isArray(savedSettingsObject.authorRecords)
+        ? savedSettingsObject.authorRecords
+        : [];
+      const legacyAuthorBanRecords = (Array.isArray(savedSettingsObject.authorBanEntries)
+        ? savedSettingsObject.authorBanEntries
+        : [])
+        .map((record) => (
+          record && typeof record === 'object'
+            ? { ...record, status: 'banned' }
+            : record
+        ));
+      const authorRecordSource = [...canonicalAuthorRecords, ...legacyAuthorBanRecords];
       const normalizedSettings = {
         ...DEFAULT_SETTINGS,
-        ...savedSettings
+        ...savedSettingsObject
       };
+
+      delete normalizedSettings.authorBanEntries;
 
       normalizedSettings.isDetectionActive = Boolean(normalizedSettings.isDetectionActive);
       normalizedSettings.isSiteAlertEnabled = Boolean(normalizedSettings.isSiteAlertEnabled);
@@ -109,6 +165,13 @@
       );
       normalizedSettings.unreadActiveWindowMinutes = normalizeUnreadActiveWindowMinutes(
         normalizedSettings.unreadActiveWindowMinutes
+      );
+      normalizedSettings.authorRecords = normalizeAuthorRecords(authorRecordSource);
+      normalizedSettings.authorBanOverlayMode = normalizeAuthorBanOverlayMode(
+        normalizedSettings.authorBanOverlayMode
+      );
+      normalizedSettings.confirmBannedAuthorJoin = normalizeConfirmBannedAuthorJoin(
+        normalizedSettings.confirmBannedAuthorJoin
       );
 
       return normalizedSettings;
@@ -207,29 +270,7 @@
     }
 
     async function fetchText(url) {
-      const response = await fetchImpl(url, { cache: 'no-store' });
-      if (!response.ok) {
-        throw new Error(`요청 실패: ${response.status}`);
-      }
-
-      return response.text();
-    }
-
-    function areStoredPostsEquivalent(leftPosts, rightPosts) {
-      if (leftPosts.length !== rightPosts.length) {
-        return false;
-      }
-
-      return leftPosts.every((leftPost, index) => {
-        const rightPost = rightPosts[index];
-        return (
-          Number(leftPost?.id) === Number(rightPost?.id) &&
-          String(leftPost?.title || '') === String(rightPost?.title || '') &&
-          String(leftPost?.subject || '') === String(rightPost?.subject || '') &&
-          String(leftPost?.fullDateStr || '') === String(rightPost?.fullDateStr || '') &&
-          String(leftPost?.postUrl || '') === String(rightPost?.postUrl || '')
-        );
-      });
+      return activeFetchRuntime.fetchText(url);
     }
 
     async function getStoredRecentPosts(settings = null) {
@@ -243,10 +284,6 @@
         storedPosts,
         getRecentHistoryOptions(resolvedSettings)
       ).filter((post) => Number.isFinite(post.id) && post.title);
-
-      if (!areStoredPostsEquivalent(storedPosts, trimmedPosts)) {
-        await chromeApi.storage.local.set({ [RECENT_POSTS_KEY]: trimmedPosts });
-      }
 
       return trimmedPosts;
     }
@@ -262,28 +299,6 @@
           .map((value) => Number(value))
           .filter(Number.isFinite)
       )].sort((left, right) => right - left);
-    }
-
-    async function storeRecentPosts(posts, settings = null) {
-      if (!Array.isArray(posts) || posts.length === 0) {
-        return;
-      }
-
-      const resolvedSettings = settings || await loadSettings();
-      const existingPosts = await getStoredRecentPosts(resolvedSettings);
-      const mergedPosts = trimRecentHistoryPosts(
-        mergePosts(posts, existingPosts, {
-          currentTime: now(),
-          viewUrlPrefix: DOMAIN_CONSTANTS.VIEW_URL_PREFIX
-        }),
-        getRecentHistoryOptions(resolvedSettings)
-      );
-
-      if (areStoredPostsEquivalent(existingPosts, mergedPosts)) {
-        return;
-      }
-
-      await chromeApi.storage.local.set({ [RECENT_POSTS_KEY]: mergedPosts });
     }
 
     function getUnreadHistoryOptions(settings, currentTime = now()) {
@@ -307,22 +322,22 @@
       const unreadPosts = hydrateUnreadPosts(recentPosts, unreadIds, settings);
       const visibleUnreadIds = unreadPosts.map((post) => Number(post.id)).filter(Number.isFinite);
 
-      if (
-        visibleUnreadIds.length !== unreadIds.length ||
-        visibleUnreadIds.some((postId, index) => postId !== unreadIds[index])
-      ) {
-        await chromeApi.storage.local.set({ [UNREAD_POST_IDS_KEY]: visibleUnreadIds });
-      }
-
       return {
         unreadIds: visibleUnreadIds,
         unreadPosts
       };
     }
 
-    async function buildPopupResponse({ source, fallback = false, error = null }) {
+    async function buildPopupResponse({
+      source,
+      fallback = false,
+      error = null,
+      recentPosts: providedRecentPosts = null
+    }) {
       const settings = await loadSettings();
-      const recentPosts = await getStoredRecentPosts(settings);
+      const recentPosts = Array.isArray(providedRecentPosts)
+        ? providedRecentPosts
+        : await getStoredRecentPosts(settings);
       const { unreadIds, unreadPosts } = await reconcileUnreadPosts(recentPosts, settings);
 
       return {
@@ -347,8 +362,15 @@
         limit: DOMAIN_CONSTANTS.LIVE_POST_LIMIT,
         viewUrlPrefix: DOMAIN_CONSTANTS.VIEW_URL_PREFIX
       });
-      await storeRecentPosts(livePosts, settings);
-      return buildPopupResponse({ source: 'popup-fetch' });
+      const storedPosts = await getStoredRecentPosts(settings);
+      const recentPosts = trimRecentHistoryPosts(
+        mergePosts(livePosts, storedPosts, {
+          currentTime: now(),
+          viewUrlPrefix: DOMAIN_CONSTANTS.VIEW_URL_PREFIX
+        }),
+        getRecentHistoryOptions(settings)
+      );
+      return buildPopupResponse({ source: 'popup-fetch', recentPosts });
     }
 
     async function getCachedPopupPosts(settings = null) {
@@ -400,7 +422,10 @@
 
       await chromeApi.scripting.executeScript({
         target: { tabId },
-        files: ['scripts/shared/seaf-overlay.js']
+        files: [
+          'scripts/shared/seaf-join-guard.js',
+          'scripts/shared/seaf-overlay.js'
+        ]
       });
 
       await chromeApi.scripting.executeScript({
@@ -470,18 +495,6 @@
       return extractLobbyLinkFromHtml(html);
     }
 
-    async function markPostRead(postId) {
-      const normalizedPostId = Number(postId);
-      if (!Number.isFinite(normalizedPostId)) {
-        return [];
-      }
-
-      const unreadIds = await getStoredUnreadPostIds();
-      const nextIds = unreadIds.filter((value) => value !== normalizedPostId);
-      await chromeApi.storage.local.set({ [UNREAD_POST_IDS_KEY]: nextIds });
-      return nextIds;
-    }
-
     function isMissingReceiverError(error) {
       return String(error?.message || error || '').includes('Receiving end does not exist');
     }
@@ -508,6 +521,8 @@
       DEFAULT_UNREAD_ACTIVE_WINDOW_MINUTES,
       MIN_UNREAD_ACTIVE_WINDOW_MINUTES,
       MAX_UNREAD_ACTIVE_WINDOW_MINUTES,
+      DEFAULT_AUTHOR_BAN_OVERLAY_MODE,
+      DEFAULT_CONFIRM_BANNED_AUTHOR_JOIN,
       RECENT_POSTS_KEY,
       UNREAD_POST_IDS_KEY,
       UNSUPPORTED_TEST_TAB_ERROR,
@@ -516,6 +531,10 @@
       normalizeRecentHistoryLimit,
       normalizeRecentHistoryRetentionMinutes,
       normalizeUnreadActiveWindowMinutes,
+      normalizeAuthorRecords,
+      normalizeAuthorBanEntries,
+      normalizeAuthorBanOverlayMode,
+      normalizeConfirmBannedAuthorJoin,
       normalizeSettings,
       loadSettings,
       createCheckingWorkerStatus,
@@ -526,8 +545,6 @@
       fetchText,
       getStoredRecentPosts,
       getStoredUnreadPostIds,
-      areStoredPostsEquivalent,
-      storeRecentPosts,
       getUnreadHistoryOptions,
       hydrateUnreadPosts,
       reconcileUnreadPosts,
@@ -538,7 +555,6 @@
       injectOverlayIntoTab,
       triggerTestToastDirectly,
       extractLobbyLinkDirectly,
-      markPostRead,
       isMissingReceiverError,
       isExpectedToastTestError
     };
