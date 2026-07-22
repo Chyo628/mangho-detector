@@ -179,6 +179,90 @@ function setupContentTest({ html, url, storageData, runtimeSendMessage }) {
   };
 }
 
+function cloneSettings(settings = {}) {
+  const cloned = { ...settings };
+  cloned.authorRecords = domain.normalizeAuthorRecords(settings.authorRecords || []);
+  return cloned;
+}
+
+function createAuthorRecordMutationRuntime(initialSettings = {}, options = {}) {
+  let settings = cloneSettings(initialSettings);
+  const failMessages = new Set(options.failMessages || []);
+
+  return {
+    getSettings() {
+      return cloneSettings(settings);
+    },
+    runtimeSendMessage(message) {
+      if (failMessages.has(message.type)) {
+        return {
+          success: false,
+          error: options.errorMessage || `failed: ${message.type}`
+        };
+      }
+
+      if (message.type === 'ADD_AUTHOR_RECORD') {
+        const nextRecord = message.author
+          ? domain.createAuthorRecord(message.author, message.note, message.status)
+          : domain.createNicknameAuthorRecord(message.nickname, message.note, message.status);
+        settings = cloneSettings({
+          ...settings,
+          authorRecords: [...settings.authorRecords, nextRecord]
+        });
+        return { success: true, settings: cloneSettings(settings) };
+      }
+
+      if (message.type === 'UPDATE_AUTHOR_RECORD_NOTE') {
+        const normalizedNote = domain.normalizeAuthorNote(message.note);
+        settings = cloneSettings({
+          ...settings,
+          authorRecords: settings.authorRecords.map((record) => {
+            if (record.key !== message.key) {
+              return record;
+            }
+
+            if (!normalizedNote) {
+              const { note: unusedNote, ...recordWithoutNote } = record;
+              return recordWithoutNote;
+            }
+
+            return { ...record, note: normalizedNote };
+          })
+        });
+        return { success: true, settings: cloneSettings(settings) };
+      }
+
+      if (message.type === 'SET_AUTHOR_RECORD_STATUS') {
+        const keySet = new Set(message.keys || []);
+        settings = cloneSettings({
+          ...settings,
+          authorRecords: settings.authorRecords.map((record) => (
+            keySet.has(record.key)
+              ? { ...record, status: message.status }
+              : record
+          ))
+        });
+        return { success: true, settings: cloneSettings(settings) };
+      }
+
+      if (message.type === 'REMOVE_AUTHOR_RECORD_KEYS') {
+        const keySet = new Set(message.keys || []);
+        settings = cloneSettings({
+          ...settings,
+          authorRecords: settings.authorRecords.filter((record) => !keySet.has(record.key))
+        });
+        return { success: true, settings: cloneSettings(settings) };
+      }
+
+      if (options.fallbackRuntimeSendMessage) {
+        return options.fallbackRuntimeSendMessage(message);
+      }
+
+      throw new Error(`Unexpected runtime message: ${message.type}`);
+    }
+  };
+}
+
 test('content init exits early on unsupported URLs', async () => {
   const handle = setupContentTest({
     html: '<!doctype html><html><body></body></html>',
@@ -766,6 +850,509 @@ test('content renders note-only authors as safe blue information and joins immed
       1
     );
     assert.equal(row.querySelector('.seaf-inline-join-confirm'), null);
+  } finally {
+    handle.cleanup();
+  }
+});
+
+test('content adds author manage buttons only for rows with parsed authors and reflects status labels', async () => {
+  const noteAuthor = { nickname: 'note-user', uid: 'note-uid', text: 'note author' };
+  const bannedAuthor = { nickname: 'ban-user', uid: 'ban-uid', text: 'ban author' };
+  const handle = setupContentTest({
+    html: buildListHtml([
+      { id: 95, title: 'plain row', subject: MANGHO_SUBJECT },
+      { id: 96, title: 'note row', subject: MANGHO_SUBJECT, author: noteAuthor },
+      { id: 97, title: 'ban row', subject: MANGHO_SUBJECT, author: bannedAuthor }
+    ]),
+    url: 'https://gall.dcinside.com/mgallery/board/lists/?id=helldiversseries',
+    storageData: {
+      seaf_settings: {
+        authorRecords: [
+          domain.createAuthorRecord(noteAuthor, 'saved note', 'note'),
+          domain.createAuthorRecord(bannedAuthor, 'saved ban', 'banned')
+        ]
+      }
+    }
+  });
+
+  try {
+    await handle.content.init();
+
+    assert.equal(document.querySelector('.ub-content[data-no="95"] .seaf-inline-author-manage-button'), null);
+    assert.equal(document.querySelector('.ub-content[data-no="96"] .seaf-inline-author-manage-button').textContent, '메모');
+    assert.equal(document.querySelector('.ub-content[data-no="97"] .seaf-inline-author-manage-button').textContent, '밴');
+  } finally {
+    handle.cleanup();
+  }
+});
+
+test('content author manager adds a new canonical record and confirms broad nickname-only scope', async () => {
+  const author = { nickname: 'ㅇㅇ', text: 'ㅇㅇ' };
+  const authorRuntime = createAuthorRecordMutationRuntime({ authorRecords: [] });
+  const handle = setupContentTest({
+    html: buildListHtml([{
+      id: 98,
+      title: 'new author row',
+      subject: MANGHO_SUBJECT,
+      author
+    }]),
+    url: 'https://gall.dcinside.com/mgallery/board/lists/?id=helldiversseries',
+    storageData: {
+      seaf_settings: {
+        authorRecords: []
+      }
+    },
+    runtimeSendMessage(message) {
+      return authorRuntime.runtimeSendMessage(message);
+    }
+  });
+
+  try {
+    await handle.content.init();
+
+    const row = document.querySelector('.ub-content[data-no="98"]');
+    const manageButton = row.querySelector('.seaf-inline-author-manage-button');
+    manageButton.click();
+
+    const panel = row.querySelector('.seaf-inline-author-manager');
+    const noteInput = panel.querySelector('.seaf-inline-author-manager-note-input');
+    const banInput = panel.querySelector('.seaf-inline-author-manager-ban-input');
+    const saveButton = panel.querySelector('.seaf-inline-author-manager-save-button');
+
+    noteInput.value = 'wide scope note';
+    banInput.checked = true;
+    saveButton.click();
+
+    assert.equal(handle.fake.state.runtimeSentMessages.length, 0);
+    assert.match(
+      panel.querySelector('.seaf-inline-author-manager-status').textContent,
+      /ㅇㅇ/
+    );
+
+    saveButton.click();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.deepEqual(handle.fake.state.runtimeSentMessages, [{
+      type: 'ADD_AUTHOR_RECORD',
+      author: domain.normalizeAuthor(author),
+      note: 'wide scope note',
+      status: 'banned'
+    }]);
+    assert.equal(panel.hidden, true);
+    assert.equal(row.querySelector('.seaf-inline-author-manage-button').textContent, '밴');
+  } finally {
+    handle.cleanup();
+  }
+});
+
+test('content author manager requires a note for new note-only records', async () => {
+  const author = { nickname: 'empty-note-new', uid: 'empty-note-new-uid', text: 'empty note new' };
+  const authorRuntime = createAuthorRecordMutationRuntime({ authorRecords: [] });
+  const handle = setupContentTest({
+    html: buildListHtml([{
+      id: 981,
+      title: 'empty new note row',
+      subject: MANGHO_SUBJECT,
+      author
+    }]),
+    url: 'https://gall.dcinside.com/mgallery/board/lists/?id=helldiversseries',
+    storageData: {
+      seaf_settings: {
+        authorRecords: []
+      }
+    },
+    runtimeSendMessage(message) {
+      return authorRuntime.runtimeSendMessage(message);
+    }
+  });
+
+  try {
+    await handle.content.init();
+
+    const row = document.querySelector('.ub-content[data-no="981"]');
+    row.querySelector('.seaf-inline-author-manage-button').click();
+
+    const panel = row.querySelector('.seaf-inline-author-manager');
+    panel.querySelector('.seaf-inline-author-manager-ban-input').checked = false;
+    panel.querySelector('.seaf-inline-author-manager-note-input').value = '   ';
+    panel.querySelector('.seaf-inline-author-manager-save-button').click();
+
+    assert.equal(handle.fake.state.runtimeSentMessages.length, 0);
+    assert.equal(
+      panel.querySelector('.seaf-inline-author-manager-error').textContent,
+      '일반 메모는 비어 있을 수 없습니다.'
+    );
+    assert.equal(panel.hidden, false);
+  } finally {
+    handle.cleanup();
+  }
+});
+
+test('content author manager updates the displayed note and toggles all overlapping matches together', async () => {
+  const author = { nickname: 'overlap-inline', uid: 'overlap-inline-uid', text: 'overlap inline' };
+  const initialSettings = {
+    authorRecords: [
+      domain.createAuthorRecord(author, 'specific note', 'note'),
+      domain.createNicknameAuthorRecord(author.nickname, 'broad warning', 'banned')
+    ]
+  };
+  const authorRuntime = createAuthorRecordMutationRuntime(initialSettings);
+  const handle = setupContentTest({
+    html: buildListHtml([{
+      id: 99,
+      title: 'overlap manage row',
+      subject: MANGHO_SUBJECT,
+      author
+    }]),
+    url: 'https://gall.dcinside.com/mgallery/board/lists/?id=helldiversseries',
+    storageData: {
+      seaf_settings: initialSettings
+    },
+    runtimeSendMessage(message) {
+      return authorRuntime.runtimeSendMessage(message);
+    }
+  });
+
+  try {
+    await handle.content.init();
+
+    const row = document.querySelector('.ub-content[data-no="99"]');
+    row.querySelector('.seaf-inline-author-manage-button').click();
+
+    const panel = row.querySelector('.seaf-inline-author-manager');
+    panel.querySelector('.seaf-inline-author-manager-note-input').value = 'edited broad warning';
+    panel.querySelector('.seaf-inline-author-manager-ban-input').checked = false;
+    panel.querySelector('.seaf-inline-author-manager-save-button').click();
+
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.deepEqual(handle.fake.state.runtimeSentMessages, [
+      {
+        type: 'UPDATE_AUTHOR_RECORD_NOTE',
+        key: 'uid:overlap-inline-uid',
+        note: 'edited broad warning'
+      },
+      {
+        type: 'SET_AUTHOR_RECORD_STATUS',
+        keys: ['nickname:overlap-inline'],
+        status: 'note'
+      }
+    ]);
+
+    const updatedSettings = authorRuntime.getSettings();
+    const updatedSummary = domain.getAuthorRecordMatchSummary(author, updatedSettings.authorRecords);
+    assert.equal(updatedSummary.isBanned, false);
+    assert.equal(updatedSummary.note, 'edited broad warning');
+    assert.equal(row.querySelector('.seaf-inline-author-manage-button').textContent, '메모');
+    assert.equal(row.querySelector('.seaf-inline-join-button').dataset.authorStatus, 'note');
+  } finally {
+    handle.cleanup();
+  }
+});
+
+test('content author manager requires a note when an existing record is saved as note-only', async () => {
+  const author = { nickname: 'empty-note-existing', uid: 'empty-note-existing-uid', text: 'empty note existing' };
+  const initialSettings = {
+    authorRecords: [domain.createAuthorRecord(author, 'existing note', 'note')]
+  };
+  const authorRuntime = createAuthorRecordMutationRuntime(initialSettings);
+  const handle = setupContentTest({
+    html: buildListHtml([{
+      id: 991,
+      title: 'empty existing note row',
+      subject: MANGHO_SUBJECT,
+      author
+    }]),
+    url: 'https://gall.dcinside.com/mgallery/board/lists/?id=helldiversseries',
+    storageData: {
+      seaf_settings: initialSettings
+    },
+    runtimeSendMessage(message) {
+      return authorRuntime.runtimeSendMessage(message);
+    }
+  });
+
+  try {
+    await handle.content.init();
+
+    const row = document.querySelector('.ub-content[data-no="991"]');
+    row.querySelector('.seaf-inline-author-manage-button').click();
+
+    const panel = row.querySelector('.seaf-inline-author-manager');
+    panel.querySelector('.seaf-inline-author-manager-ban-input').checked = false;
+    panel.querySelector('.seaf-inline-author-manager-note-input').value = '';
+    panel.querySelector('.seaf-inline-author-manager-save-button').click();
+
+    assert.equal(handle.fake.state.runtimeSentMessages.length, 0);
+    assert.equal(
+      panel.querySelector('.seaf-inline-author-manager-error').textContent,
+      '일반 메모는 비어 있을 수 없습니다.'
+    );
+    assert.equal(row.querySelector('.seaf-inline-author-manage-button').textContent, '메모');
+    assert.equal(panel.hidden, false);
+  } finally {
+    handle.cleanup();
+  }
+});
+
+test('content author manager delete requires confirmation with the matching count and removes all overlaps', async () => {
+  const author = { nickname: 'remove-me', uid: 'remove-uid', text: 'remove me' };
+  const initialSettings = {
+    authorRecords: [
+      domain.createAuthorRecord(author, 'specific note', 'note'),
+      domain.createNicknameAuthorRecord(author.nickname, 'broad warning', 'banned')
+    ]
+  };
+  const authorRuntime = createAuthorRecordMutationRuntime(initialSettings);
+  const handle = setupContentTest({
+    html: buildListHtml([{
+      id: 100,
+      title: 'delete manage row',
+      subject: MANGHO_SUBJECT,
+      author
+    }]),
+    url: 'https://gall.dcinside.com/mgallery/board/lists/?id=helldiversseries',
+    storageData: {
+      seaf_settings: initialSettings
+    },
+    runtimeSendMessage(message) {
+      return authorRuntime.runtimeSendMessage(message);
+    }
+  });
+
+  try {
+    await handle.content.init();
+
+    const row = document.querySelector('.ub-content[data-no="100"]');
+    row.querySelector('.seaf-inline-author-manage-button').click();
+
+    const panel = row.querySelector('.seaf-inline-author-manager');
+    const deleteButton = panel.querySelector('.seaf-inline-author-manager-delete-button');
+    deleteButton.click();
+
+    assert.match(panel.querySelector('.seaf-inline-author-manager-status').textContent, /2/);
+    assert.equal(handle.fake.state.runtimeSentMessages.length, 0);
+
+    deleteButton.click();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.deepEqual(handle.fake.state.runtimeSentMessages, [{
+      type: 'REMOVE_AUTHOR_RECORD_KEYS',
+      keys: ['uid:remove-uid', 'nickname:remove-me']
+    }]);
+    assert.equal(panel.hidden, true);
+    assert.equal(row.querySelector('.seaf-inline-author-manage-button').textContent, '+ 기록');
+  } finally {
+    handle.cleanup();
+  }
+});
+
+test('content author manager preserves the draft when a mutation fails', async () => {
+  const author = { nickname: 'fail-inline', uid: 'fail-inline-uid', text: 'fail inline' };
+  const authorRuntime = createAuthorRecordMutationRuntime({
+    authorRecords: [domain.createAuthorRecord(author, 'before', 'note')]
+  }, {
+    failMessages: ['UPDATE_AUTHOR_RECORD_NOTE'],
+    errorMessage: 'note update failed'
+  });
+  const handle = setupContentTest({
+    html: buildListHtml([{
+      id: 101,
+      title: 'failure manage row',
+      subject: MANGHO_SUBJECT,
+      author
+    }]),
+    url: 'https://gall.dcinside.com/mgallery/board/lists/?id=helldiversseries',
+    storageData: {
+      seaf_settings: {
+        authorRecords: [domain.createAuthorRecord(author, 'before', 'note')]
+      }
+    },
+    runtimeSendMessage(message) {
+      return authorRuntime.runtimeSendMessage(message);
+    }
+  });
+
+  try {
+    await handle.content.init();
+
+    const row = document.querySelector('.ub-content[data-no="101"]');
+    row.querySelector('.seaf-inline-author-manage-button').click();
+
+    const panel = row.querySelector('.seaf-inline-author-manager');
+    const noteInput = panel.querySelector('.seaf-inline-author-manager-note-input');
+    const banInput = panel.querySelector('.seaf-inline-author-manager-ban-input');
+    noteInput.value = 'draft after failure';
+    banInput.checked = true;
+    panel.querySelector('.seaf-inline-author-manager-save-button').click();
+
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(panel.hidden, false);
+    assert.equal(noteInput.value, 'draft after failure');
+    assert.equal(banInput.checked, true);
+    assert.equal(panel.querySelector('.seaf-inline-author-manager-error').textContent, 'note update failed');
+    assert.equal(row.querySelector('.seaf-inline-author-manage-button').textContent, '메모');
+    assert.equal(row.querySelector('.seaf-inline-join-button').dataset.authorStatus, 'note');
+  } finally {
+    handle.cleanup();
+  }
+});
+
+test('content author manager keeps delete disabled after a failed new-record add', async () => {
+  const author = { nickname: 'fail-new-inline', uid: 'fail-new-inline-uid', text: 'fail new inline' };
+  const authorRuntime = createAuthorRecordMutationRuntime({
+    authorRecords: []
+  }, {
+    failMessages: ['ADD_AUTHOR_RECORD'],
+    errorMessage: 'add failed'
+  });
+  const handle = setupContentTest({
+    html: buildListHtml([{
+      id: 1011,
+      title: 'failed add row',
+      subject: MANGHO_SUBJECT,
+      author
+    }]),
+    url: 'https://gall.dcinside.com/mgallery/board/lists/?id=helldiversseries',
+    storageData: {
+      seaf_settings: {
+        authorRecords: []
+      }
+    },
+    runtimeSendMessage(message) {
+      return authorRuntime.runtimeSendMessage(message);
+    }
+  });
+
+  try {
+    await handle.content.init();
+
+    const row = document.querySelector('.ub-content[data-no="1011"]');
+    row.querySelector('.seaf-inline-author-manage-button').click();
+
+    const panel = row.querySelector('.seaf-inline-author-manager');
+    const noteInput = panel.querySelector('.seaf-inline-author-manager-note-input');
+    const saveButton = panel.querySelector('.seaf-inline-author-manager-save-button');
+    const deleteButton = panel.querySelector('.seaf-inline-author-manager-delete-button');
+
+    assert.equal(deleteButton.disabled, true);
+    assert.equal(deleteButton.textContent, '기록 없음');
+
+    noteInput.value = 'new note';
+    saveButton.click();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(panel.hidden, false);
+    assert.equal(panel.querySelector('.seaf-inline-author-manager-error').textContent, 'add failed');
+    assert.equal(deleteButton.disabled, true);
+    assert.equal(deleteButton.textContent, '기록 없음');
+    assert.equal(noteInput.disabled, false);
+    assert.equal(saveButton.disabled, false);
+  } finally {
+    handle.cleanup();
+  }
+});
+
+test('content author manager keeps only one popover open and closes on escape or outside click without breaking join', async () => {
+  const firstAuthor = { nickname: 'first-inline', uid: 'first-inline-uid', text: 'first inline' };
+  const secondAuthor = { nickname: 'second-inline', uid: 'second-inline-uid', text: 'second inline' };
+  const handle = setupContentTest({
+    html: buildListHtml([
+      { id: 102, title: 'first row', subject: MANGHO_SUBJECT, author: firstAuthor },
+      { id: 103, title: 'second row', subject: MANGHO_SUBJECT, author: secondAuthor }
+    ]),
+    url: 'https://gall.dcinside.com/mgallery/board/lists/?id=helldiversseries',
+    storageData: {
+      seaf_settings: {
+        authorRecords: []
+      }
+    },
+    runtimeSendMessage(message) {
+      if (message.type === 'JOIN_POST') {
+        return { success: true, opened: true };
+      }
+
+      throw new Error(`Unexpected runtime message: ${message.type}`);
+    }
+  });
+
+  try {
+    await handle.content.init();
+
+    const firstRow = document.querySelector('.ub-content[data-no="102"]');
+    const secondRow = document.querySelector('.ub-content[data-no="103"]');
+    firstRow.querySelector('.seaf-inline-author-manage-button').click();
+    assert.equal(firstRow.querySelector('.seaf-inline-author-manager').hidden, false);
+
+    secondRow.querySelector('.seaf-inline-author-manage-button').click();
+    assert.equal(firstRow.querySelector('.seaf-inline-author-manager').hidden, true);
+    assert.equal(secondRow.querySelector('.seaf-inline-author-manager').hidden, false);
+
+    document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    assert.equal(secondRow.querySelector('.seaf-inline-author-manager').hidden, true);
+
+    secondRow.querySelector('.seaf-inline-author-manage-button').click();
+    document.body.dispatchEvent(new window.MouseEvent('mousedown', { bubbles: true }));
+    assert.equal(secondRow.querySelector('.seaf-inline-author-manager').hidden, true);
+
+    secondRow.querySelector('.seaf-inline-author-manage-button').click();
+    secondRow.querySelector('.seaf-inline-join-button').click();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    assert.equal(secondRow.querySelector('.seaf-inline-author-manager').hidden, true);
+    assert.equal(handle.fake.state.runtimeSentMessages.at(-1).type, 'JOIN_POST');
+  } finally {
+    handle.cleanup();
+  }
+});
+
+test('content author manager works for dynamically added rows and follows storage sync updates', async () => {
+  const dynamicAuthor = { nickname: 'dynamic-inline', uid: 'dynamic-inline-uid', text: 'dynamic inline' };
+  const handle = setupContentTest({
+    html: buildListHtml([
+      { id: 104, title: 'existing row', subject: MANGHO_SUBJECT, author: { nickname: 'base', uid: 'base-uid', text: 'base' } }
+    ]),
+    url: 'https://gall.dcinside.com/mgallery/board/lists/?id=helldiversseries',
+    storageData: {
+      seaf_settings: {
+        isSiteAlertEnabled: false,
+        authorRecords: []
+      }
+    }
+  });
+
+  try {
+    await handle.content.init();
+
+    document.querySelector('tbody.listwrap2').insertAdjacentHTML(
+      'beforeend',
+      buildRow({
+        id: 105,
+        title: 'dynamic row',
+        subject: MANGHO_SUBJECT,
+        author: dynamicAuthor
+      })
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    const row = document.querySelector('.ub-content[data-no="105"]');
+    const manageButton = row.querySelector('.seaf-inline-author-manage-button');
+    assert.ok(manageButton);
+    assert.equal(manageButton.textContent, '+ 기록');
+
+    const nextRecord = domain.createAuthorRecord(dynamicAuthor, 'synced note', 'banned');
+    handle.fake.emitStorageChange({
+      seaf_settings: {
+        oldValue: { authorRecords: [] },
+        newValue: { authorRecords: [nextRecord] }
+      }
+    });
+
+    assert.equal(manageButton.textContent, '밴');
+    assert.equal(row.querySelector('.seaf-inline-join-button').dataset.authorStatus, 'banned');
   } finally {
     handle.cleanup();
   }
@@ -1417,6 +2004,110 @@ test('content repositions the banned-author tooltip when it would overflow the v
 
     assert.equal(tooltip.classList.contains('seaf-inline-ban-tooltip--align-left'), true);
     assert.equal(tooltip.classList.contains('seaf-inline-ban-tooltip--below'), true);
+  } finally {
+    handle.cleanup();
+  }
+});
+
+test('content repositions the author manager panel when it would overflow the left viewport edge', async () => {
+  const author = { nickname: 'panel-edge', uid: 'panel-edge-uid', text: 'panel edge' };
+  const handle = setupContentTest({
+    html: buildListHtml([{
+      id: 142,
+      title: 'panel edge row',
+      subject: MANGHO_SUBJECT,
+      author
+    }]),
+    url: 'https://gall.dcinside.com/mgallery/board/lists/?id=helldiversseries',
+    storageData: {
+      seaf_settings: {
+        authorRecords: []
+      }
+    }
+  });
+
+  try {
+    await handle.content.init();
+
+    const row = document.querySelector('.ub-content[data-no="142"]');
+    const manageButton = row.querySelector('.seaf-inline-author-manage-button');
+    const originalWidth = window.innerWidth;
+    Object.defineProperty(window, 'innerWidth', {
+      configurable: true,
+      value: 320
+    });
+
+    manageButton.click();
+    const panel = row.querySelector('.seaf-inline-author-manager');
+    panel.getBoundingClientRect = () => ({
+      left: -16,
+      right: 244,
+      top: 40,
+      bottom: 220,
+      width: 260,
+      height: 180
+    });
+
+    handle.content.updateAuthorManagerPlacement(panel);
+
+    assert.equal(panel.style.transform, 'translateX(24px)');
+
+    Object.defineProperty(window, 'innerWidth', {
+      configurable: true,
+      value: originalWidth
+    });
+  } finally {
+    handle.cleanup();
+  }
+});
+
+test('content repositions the author manager panel when it would overflow the bottom viewport edge', async () => {
+  const author = { nickname: 'panel-bottom', uid: 'panel-bottom-uid', text: 'panel bottom' };
+  const handle = setupContentTest({
+    html: buildListHtml([{
+      id: 143,
+      title: 'panel bottom row',
+      subject: MANGHO_SUBJECT,
+      author
+    }]),
+    url: 'https://gall.dcinside.com/mgallery/board/lists/?id=helldiversseries',
+    storageData: {
+      seaf_settings: {
+        authorRecords: []
+      }
+    }
+  });
+
+  try {
+    await handle.content.init();
+
+    const row = document.querySelector('.ub-content[data-no="143"]');
+    const manageButton = row.querySelector('.seaf-inline-author-manage-button');
+    const originalHeight = window.innerHeight;
+    Object.defineProperty(window, 'innerHeight', {
+      configurable: true,
+      value: 240
+    });
+
+    manageButton.click();
+    const panel = row.querySelector('.seaf-inline-author-manager');
+    panel.getBoundingClientRect = () => ({
+      left: 40,
+      right: 300,
+      top: 80,
+      bottom: 300,
+      width: 260,
+      height: 220
+    });
+
+    handle.content.updateAuthorManagerPlacement(panel);
+
+    assert.equal(panel.style.transform, 'translateY(-68px)');
+
+    Object.defineProperty(window, 'innerHeight', {
+      configurable: true,
+      value: originalHeight
+    });
   } finally {
     handle.cleanup();
   }

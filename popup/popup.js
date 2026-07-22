@@ -12,6 +12,7 @@ const settingsClient = settingsClientModule.createSettingsClient({
 
 const HISTORY_COLLAPSED_KEY = 'seaf_popup_history_collapsed';
 const SETTINGS_COLLAPSED_KEY = 'seaf_popup_settings_collapsed';
+const AUTHOR_MANAGER_COLLAPSED_KEY = 'seaf_popup_author_manager_collapsed';
 const AUTHOR_BAN_LIST_COLLAPSED_KEY = 'seaf_popup_author_ban_list_collapsed';
 const AUTHOR_NOTE_LIST_COLLAPSED_KEY = 'seaf_popup_author_note_list_collapsed';
 const MAX_AUTHOR_NOTE_LENGTH = Number(
@@ -81,63 +82,36 @@ const LABELS = {
   expandHistory: '펼치기',
   collapseSettings: '접기',
   expandSettings: '펼치기',
-  collapseAuthorBanList: '접기',
-  expandAuthorBanList: '펼치기',
-  collapseAuthorNoteList: '접기',
-  expandAuthorNoteList: '펼치기',
+  collapseAuthorManager: '접기',
+  expandAuthorManager: '펼치기',
   alertDisabled: '알림 꺼짐',
   badgeOnly: '배지 중심',
   checkingConnection: '연결 확인 중',
-  authorBanSaved: '밴 목록을 저장했습니다.',
-  authorBanNoteSaved: '밴 메모를 저장했습니다.',
+  authorBanSaved: '작성자를 밴으로 저장했습니다.',
   authorBanDuplicate: '이미 등록된 글쓴이입니다.',
   authorBanInvalid: '등록할 닉네임이나 글쓴이 정보를 찾지 못했습니다.',
   authorBanRemoved: '밴 항목을 삭제했습니다.',
-  authorBanSelectedRemoved: '선택한 밴 항목을 삭제했습니다.',
-  authorBanCleared: '밴 목록을 모두 비웠습니다.',
   authorBanNoSelection: '선택된 밴 항목이 없습니다.',
   authorBanWarnModeSaved: '밴 경고 모드를 저장했습니다.',
   authorBanHideModeSaved: '밴 숨김 모드를 저장했습니다.',
-  authorBanEmpty: '등록된 밴 항목이 없습니다.',
-  authorBanSearchEmpty: '검색 결과가 없습니다.',
   authorBanCommonNicknameConfirm: '"ㅇㅇ"은 매우 넓게 매칭됩니다. 그대로 추가할까요?',
-  authorBanClearAllConfirm: '밴 목록을 모두 삭제할까요?',
   authorBanChipWarn: '밴 글쓴이 · 경고',
   authorBanChipHide: '밴 글쓴이 · 배너 숨김',
   authorBanQuickAdd: '밴 추가',
-  authorBanQuickRemove: '밴 해제',
   authorBanQuickNotePrompt: '밴 메모를 입력하세요. 비워두면 기본 경고 문구가 표시됩니다.',
   authorBanJoinConfirmSaved: '밴 글쓴이 참가 확인 설정을 저장했습니다.',
-  authorBanJoinWarning: '밴 목록에 있는 글쓴이입니다. 참가하기 전에 다시 확인하세요.',
-  authorBanContinueJoin: '계속 참가',
-  authorBanCancel: '취소',
-  authorBanRemovePrimary: '이 규칙만 해제',
-  authorBanRemoveAll: '일치 규칙 모두 해제',
-  authorBanMultipleMatches: '이 글쓴이와 일치하는 밴 규칙이 여러 개 있습니다.',
-  authorBanNoteDirty: '저장되지 않은 변경',
-  authorBanNoteSaving: '저장 중…',
-  authorBanNoteSaveFailed: '저장하지 못했습니다. 다시 시도하세요.',
-  authorBanNoteSave: '저장',
-  authorBanCapacityReached: '밴 목록은 최대 200개까지 저장할 수 있습니다.',
   authorNoteSaved: '글쓴이 메모를 저장했습니다.',
   authorNoteUpdated: '글쓴이 메모를 저장했습니다.',
   authorNoteRemoved: '글쓴이 메모를 삭제했습니다.',
-  authorNoteSelectedRemoved: '선택한 글쓴이 메모를 삭제했습니다.',
-  authorNoteCleared: '글쓴이 메모를 모두 비웠습니다.',
-  authorNoteNoSelection: '선택된 글쓴이 메모가 없습니다.',
-  authorNoteEmpty: '저장된 글쓴이 메모가 없습니다.',
   authorNoteRequired: '글쓴이 메모를 입력해 주세요.',
-  authorNoteClearAllConfirm: '글쓴이 메모를 모두 삭제할까요?',
   authorNoteQuickAdd: '메모 추가',
   authorNoteQuickEdit: '메모 편집',
   authorNoteQuickPrompt: '글쓴이 메모를 입력하세요.',
   authorNoteChip: '글쓴이 메모',
   authorRecordMoveToNote: '메모로 전환',
   authorRecordMoveToBan: '밴으로 전환',
-  authorRecordMovedToNote: '메모 목록으로 전환했습니다.',
-  authorRecordMovedToBan: '밴 목록으로 전환했습니다.',
-  authorRecordMoveSelectedToNote: '선택 항목을 메모 목록으로 전환했습니다.',
-  authorRecordMoveSelectedToBan: '선택 항목을 밴 목록으로 전환했습니다.',
+  authorRecordMovedToNote: '일반 메모로 전환했습니다.',
+  authorRecordMovedToBan: '밴으로 전환했습니다.',
   authorRecordUndoDone: '전환을 취소했습니다.',
   authorRecordUndoFailed: '전환을 되돌리지 못했습니다. 다시 시도하세요.',
   authorRecordSwapFailed: '목록을 전환하지 못했습니다. 다시 시도하세요.',
@@ -146,6 +120,15 @@ const LABELS = {
   authorRecordNoteSaveFailed: '저장하지 못했습니다. 입력 내용은 유지됩니다.',
   authorRecordNoteSave: '저장',
   authorRecordCapacityReached: '글쓴이 기록은 최대 200개까지 저장할 수 있습니다.',
+  authorManagerSelectionModeOn: '선택 관리 종료',
+  authorManagerSelectionModeOff: '선택 관리',
+  authorManagerSearchEmpty: '검색 결과가 없습니다.',
+  authorManagerEmpty: '저장된 작성자 기록이 없습니다.',
+  authorManagerEmptyHint: '닉네임과 메모를 추가하거나 갤러리에서 바로 기록하세요.',
+  authorManagerBulkBanned: '선택한 작성자를 밴으로 전환했습니다.',
+  authorManagerBulkUnbanned: '선택한 작성자의 밴을 해제했습니다.',
+  authorManagerBulkDeleteConfirm: '선택한 작성자 기록 {count}개를 삭제할까요?',
+  authorManagerSelectionRequired: '선택된 작성자가 없습니다.',
   anonymousAuthor: '익명 글쓴이'
 };
 const confirmPanelsModule = globalThis.SEAFPopupConfirmPanels
@@ -224,34 +207,25 @@ function getElements() {
     historyLimitInput: document.getElementById('seaf-history-limit-input'),
     historyRetentionInput: document.getElementById('seaf-history-retention-input'),
     unreadActiveWindowInput: document.getElementById('seaf-unread-window-input'),
-    authorBanInput: document.getElementById('seaf-author-ban-input'),
-    authorBanNoteInput: document.getElementById('seaf-author-ban-note-input'),
-    authorBanAddButton: document.getElementById('seaf-author-ban-add-button'),
-    authorBanSearchInput: document.getElementById('seaf-author-ban-search-input'),
-    authorBanSelectVisible: document.getElementById('seaf-author-ban-select-visible'),
-    authorBanDeleteSelectedButton: document.getElementById('seaf-author-ban-delete-selected-button'),
-    authorBanMoveSelectedButton: document.getElementById('seaf-author-ban-move-selected-button'),
-    authorBanClearAllButton: document.getElementById('seaf-author-ban-clear-all-button'),
-    authorBanCount: document.getElementById('seaf-author-ban-count'),
-    authorBanList: document.getElementById('seaf-author-ban-list'),
-    authorBanPanel: document.getElementById('seaf-author-ban-panel'),
-    authorBanListToggleButton: document.getElementById('seaf-author-ban-list-toggle-button'),
-    authorBanRosterBody: document.getElementById('seaf-author-ban-roster-body'),
+    authorManagerPanel: document.getElementById('seaf-author-manager-panel'),
+    authorManagerBody: document.getElementById('seaf-author-manager-body'),
+    authorManagerToggleButton: document.getElementById('seaf-author-manager-toggle-button'),
+    authorManagerCount: document.getElementById('seaf-author-manager-count'),
+    authorManagerNicknameInput: document.getElementById('seaf-author-manager-nickname-input'),
+    authorManagerNoteInput: document.getElementById('seaf-author-manager-note-input'),
+    authorManagerBanToggle: document.getElementById('seaf-author-manager-ban-toggle'),
+    authorManagerAddButton: document.getElementById('seaf-author-manager-add-button'),
+    authorManagerSearchInput: document.getElementById('seaf-author-manager-search-input'),
+    authorManagerFilterButtons: [...document.querySelectorAll('#seaf-author-manager-panel [data-filter]')],
+    authorManagerSelectionModeButton: document.getElementById('seaf-author-manager-selection-mode-button'),
+    authorManagerSelectionBar: document.getElementById('seaf-author-manager-selection-bar'),
+    authorManagerSelectVisible: document.getElementById('seaf-author-manager-select-visible'),
+    authorManagerBulkBanButton: document.getElementById('seaf-author-manager-bulk-ban-button'),
+    authorManagerBulkUnbanButton: document.getElementById('seaf-author-manager-bulk-unban-button'),
+    authorManagerBulkDeleteButton: document.getElementById('seaf-author-manager-bulk-delete-button'),
+    authorManagerList: document.getElementById('seaf-author-manager-list'),
     authorBanModeInputs: [...document.querySelectorAll('input[name="seaf-author-ban-mode"]')],
     authorBanJoinConfirmToggle: document.getElementById('seaf-author-ban-join-confirm-toggle'),
-    authorNoteInput: document.getElementById('seaf-author-note-input'),
-    authorNoteNoteInput: document.getElementById('seaf-author-note-note-input'),
-    authorNoteAddButton: document.getElementById('seaf-author-note-add-button'),
-    authorNoteSearchInput: document.getElementById('seaf-author-note-search-input'),
-    authorNoteSelectVisible: document.getElementById('seaf-author-note-select-visible'),
-    authorNoteMoveSelectedButton: document.getElementById('seaf-author-note-move-selected-button'),
-    authorNoteDeleteSelectedButton: document.getElementById('seaf-author-note-delete-selected-button'),
-    authorNoteClearAllButton: document.getElementById('seaf-author-note-clear-all-button'),
-    authorNoteCount: document.getElementById('seaf-author-note-count'),
-    authorNoteList: document.getElementById('seaf-author-note-list'),
-    authorNotePanel: document.getElementById('seaf-author-note-panel'),
-    authorNoteListToggleButton: document.getElementById('seaf-author-note-list-toggle-button'),
-    authorNoteRosterBody: document.getElementById('seaf-author-note-roster-body'),
     authorRecordUndo: document.getElementById('seaf-author-record-undo'),
     authorRecordUndoMessage: document.getElementById('seaf-author-record-undo-message'),
     authorRecordUndoButton: document.getElementById('seaf-author-record-undo-button'),
@@ -268,7 +242,7 @@ function getElements() {
     settingsPanel: document.getElementById('seaf-settings-panel') || document.querySelector('.seaf-settings-panel'),
     feedList: document.getElementById('seaf-post-list'),
     historyList: document.getElementById('seaf-history-list'),
-    settingsBody: document.getElementById('seaf-settings-body') || document.getElementById('seaf-settings-content'),
+    settingsBody: document.getElementById('seaf-settings-body'),
     saveStatus: document.getElementById('seaf-save-status'),
     permissionStatus: document.getElementById('seaf-permission-status'),
     loadingStatus: document.getElementById('seaf-loading-status')
@@ -283,27 +257,35 @@ function setPermissionStatus(elements, message) {
 
 function loadUiState() {
   try {
+    const storedAuthorManagerCollapsed = localStorage.getItem(AUTHOR_MANAGER_COLLAPSED_KEY);
     return {
       isHistoryCollapsed: localStorage.getItem(HISTORY_COLLAPSED_KEY) === 'true',
       isSettingsCollapsed: localStorage.getItem(SETTINGS_COLLAPSED_KEY) === 'true',
-      isAuthorBanListCollapsed: localStorage.getItem(AUTHOR_BAN_LIST_COLLAPSED_KEY) === 'true',
-      isAuthorNoteListCollapsed: localStorage.getItem(AUTHOR_NOTE_LIST_COLLAPSED_KEY) === 'true',
-      authorBanQuery: '',
-      authorNoteQuery: '',
-      selectedAuthorBanKeys: [],
-      selectedAuthorNoteKeys: [],
+      isAuthorManagerCollapsed: storedAuthorManagerCollapsed === null
+        ? (
+          localStorage.getItem(AUTHOR_BAN_LIST_COLLAPSED_KEY) === 'true'
+          && localStorage.getItem(AUTHOR_NOTE_LIST_COLLAPSED_KEY) === 'true'
+        )
+        : storedAuthorManagerCollapsed === 'true',
+      authorManagerQuery: '',
+      authorManagerFilter: 'all',
+      authorManagerSelectionMode: false,
+      selectedAuthorRecordKeys: [],
+      authorManagerDrafts: {},
+      authorManagerDeletedKeys: [],
       authorRecordUndo: null
     };
   } catch (error) {
     return {
       isHistoryCollapsed: false,
       isSettingsCollapsed: false,
-      isAuthorBanListCollapsed: false,
-      isAuthorNoteListCollapsed: false,
-      authorBanQuery: '',
-      authorNoteQuery: '',
-      selectedAuthorBanKeys: [],
-      selectedAuthorNoteKeys: [],
+      isAuthorManagerCollapsed: false,
+      authorManagerQuery: '',
+      authorManagerFilter: 'all',
+      authorManagerSelectionMode: false,
+      selectedAuthorRecordKeys: [],
+      authorManagerDrafts: {},
+      authorManagerDeletedKeys: [],
       authorRecordUndo: null
     };
   }
@@ -314,12 +296,8 @@ function persistUiState(state) {
     localStorage.setItem(HISTORY_COLLAPSED_KEY, String(Boolean(state.ui?.isHistoryCollapsed)));
     localStorage.setItem(SETTINGS_COLLAPSED_KEY, String(Boolean(state.ui?.isSettingsCollapsed)));
     localStorage.setItem(
-      AUTHOR_BAN_LIST_COLLAPSED_KEY,
-      String(Boolean(state.ui?.isAuthorBanListCollapsed))
-    );
-    localStorage.setItem(
-      AUTHOR_NOTE_LIST_COLLAPSED_KEY,
-      String(Boolean(state.ui?.isAuthorNoteListCollapsed))
+      AUTHOR_MANAGER_COLLAPSED_KEY,
+      String(Boolean(state.ui?.isAuthorManagerCollapsed))
     );
   } catch (error) {
     // Ignore storage failures in popup UI state.
@@ -365,10 +343,8 @@ function renderSettings(elements, state) {
     elements.authorBanJoinConfirmToggle.checked = normalizedSettings.confirmBannedAuthorJoin !== false;
   }
 
-  renderAuthorBanManager(elements, state);
-  renderAuthorNoteManager(elements, state);
-  renderAuthorBanListVisibility(elements, state);
-  renderAuthorNoteListVisibility(elements, state);
+  renderAuthorManager(elements, state);
+  renderAuthorManagerVisibility(elements, state);
   renderAuthorRecordUndo(elements, state);
 }
 
@@ -418,38 +394,21 @@ function renderSettingsVisibility(elements, state) {
   elements.settingsToggleButton.setAttribute('aria-expanded', String(!isCollapsed));
 }
 
-function renderAuthorBanListVisibility(elements, state) {
-  if (!elements.authorBanRosterBody || !elements.authorBanListToggleButton) {
+function renderAuthorManagerVisibility(elements, state) {
+  if (!elements.authorManagerBody || !elements.authorManagerToggleButton) {
     return;
   }
 
-  const isCollapsed = Boolean(state.ui?.isAuthorBanListCollapsed);
-  elements.authorBanRosterBody.hidden = isCollapsed;
-  if (elements.authorBanPanel) {
-    elements.authorBanPanel.dataset.listCollapsed = String(isCollapsed);
+  const isCollapsed = Boolean(state.ui?.isAuthorManagerCollapsed);
+  elements.authorManagerBody.hidden = isCollapsed;
+  if (elements.authorManagerPanel) {
+    elements.authorManagerPanel.dataset.collapsed = String(isCollapsed);
   }
-  elements.authorBanListToggleButton.dataset.collapsed = String(isCollapsed);
-  elements.authorBanListToggleButton.textContent = isCollapsed
-    ? LABELS.expandAuthorBanList
-    : LABELS.collapseAuthorBanList;
-  elements.authorBanListToggleButton.setAttribute('aria-expanded', String(!isCollapsed));
-}
-
-function renderAuthorNoteListVisibility(elements, state) {
-  if (!elements.authorNoteRosterBody || !elements.authorNoteListToggleButton) {
-    return;
-  }
-
-  const isCollapsed = Boolean(state.ui?.isAuthorNoteListCollapsed);
-  elements.authorNoteRosterBody.hidden = isCollapsed;
-  if (elements.authorNotePanel) {
-    elements.authorNotePanel.dataset.listCollapsed = String(isCollapsed);
-  }
-  elements.authorNoteListToggleButton.dataset.collapsed = String(isCollapsed);
-  elements.authorNoteListToggleButton.textContent = isCollapsed
-    ? LABELS.expandAuthorNoteList
-    : LABELS.collapseAuthorNoteList;
-  elements.authorNoteListToggleButton.setAttribute('aria-expanded', String(!isCollapsed));
+  elements.authorManagerToggleButton.dataset.collapsed = String(isCollapsed);
+  elements.authorManagerToggleButton.textContent = isCollapsed
+    ? LABELS.expandAuthorManager
+    : LABELS.collapseAuthorManager;
+  elements.authorManagerToggleButton.setAttribute('aria-expanded', String(!isCollapsed));
 }
 
 function renderAuthorRecordUndo(elements, state) {
@@ -670,172 +629,151 @@ function renderPostList(container, posts, kind, state, elements) {
   });
 }
 
-function renderAuthorBanManager(elements, state) {
-  renderAuthorRecordManager(elements, state, 'banned');
-}
-
-function renderAuthorNoteManager(elements, state) {
-  renderAuthorRecordManager(elements, state, 'note');
-}
-
-function renderAuthorRecordManager(elements, state, status) {
-  const config = getAuthorRecordManagerConfig(elements, status);
-  if (!config.list) {
+function renderAuthorManager(elements, state) {
+  if (!elements.authorManagerList) {
     return;
   }
 
-  const entries = getAuthorRecords(state).filter((entry) => entry.status === status);
-  const visibleEntries = getVisibleAuthorRecords(state, status);
+  captureAuthorManagerDrafts(elements, state);
+
+  const allEntries = getAuthorRecords(state);
+  const visibleEntries = getVisibleManagedAuthorRecords(state);
   const visibleKeySet = new Set(visibleEntries.map((entry) => entry.key));
   const selectedSet = new Set(
-    (state.ui[config.selectedKey] || []).filter((key) => visibleKeySet.has(key))
+    (state.ui.selectedAuthorRecordKeys || []).filter((key) => visibleKeySet.has(key))
   );
-  state.ui[config.selectedKey] = [...selectedSet];
+  state.ui.selectedAuthorRecordKeys = [...selectedSet];
 
-  config.count.textContent = `${entries.length}개`;
-  config.searchInput.value = state.ui[config.queryKey] || '';
-  config.moveSelectedButton.disabled = selectedSet.size === 0;
-  config.deleteSelectedButton.disabled = selectedSet.size === 0;
-  config.clearAllButton.disabled = entries.length === 0;
-  config.selectVisible.checked = visibleEntries.length > 0 && selectedSet.size === visibleEntries.length;
-  config.selectVisible.indeterminate = selectedSet.size > 0 && selectedSet.size < visibleEntries.length;
-  config.selectVisible.disabled = visibleEntries.length === 0;
+  const bannedCount = allEntries.filter((entry) => entry.status === 'banned').length;
+  const noteCount = allEntries.length - bannedCount;
+  elements.authorManagerCount.textContent = `전체 ${allEntries.length} · 밴 ${bannedCount} · 메모 ${noteCount}`;
+  elements.authorManagerSearchInput.value = state.ui.authorManagerQuery || '';
+  elements.authorManagerBanToggle.checked = Boolean(elements.authorManagerBanToggle.checked);
 
-  config.list.replaceChildren();
+  const isSelectionMode = Boolean(state.ui.authorManagerSelectionMode);
+  elements.authorManagerSelectionModeButton.textContent = isSelectionMode
+    ? LABELS.authorManagerSelectionModeOn
+    : LABELS.authorManagerSelectionModeOff;
+  elements.authorManagerSelectionModeButton.setAttribute('aria-pressed', String(isSelectionMode));
+  elements.authorManagerSelectionBar.hidden = !isSelectionMode;
+  elements.authorManagerBulkBanButton.disabled = selectedSet.size === 0;
+  elements.authorManagerBulkUnbanButton.disabled = selectedSet.size === 0;
+  elements.authorManagerBulkDeleteButton.disabled = selectedSet.size === 0;
+  elements.authorManagerSelectVisible.checked =
+    visibleEntries.length > 0 && selectedSet.size === visibleEntries.length;
+  elements.authorManagerSelectVisible.indeterminate =
+    selectedSet.size > 0 && selectedSet.size < visibleEntries.length;
+  elements.authorManagerSelectVisible.disabled = visibleEntries.length === 0;
+
+  elements.authorManagerFilterButtons.forEach((button) => {
+    const filter = button.dataset.filter || 'all';
+    button.setAttribute('aria-pressed', String(state.ui.authorManagerFilter === filter));
+  });
+
+  elements.authorManagerList.replaceChildren();
 
   if (visibleEntries.length === 0) {
     const emptyCard = document.createElement('article');
     emptyCard.className = 'seaf-empty-card';
     const emptyTitle = document.createElement('strong');
     const emptyBody = document.createElement('span');
-    emptyTitle.textContent = state.ui[config.queryKey]
-      ? LABELS.authorBanSearchEmpty
-      : config.emptyLabel;
-    emptyBody.textContent = state.ui[config.queryKey]
-      ? state.ui[config.queryKey]
-      : config.emptyHint;
+    emptyTitle.textContent = state.ui.authorManagerQuery
+      ? LABELS.authorManagerSearchEmpty
+      : LABELS.authorManagerEmpty;
+    emptyBody.textContent = state.ui.authorManagerQuery
+      ? state.ui.authorManagerQuery
+      : LABELS.authorManagerEmptyHint;
     emptyCard.append(emptyTitle, document.createElement('br'), emptyBody);
-    config.list.appendChild(emptyCard);
+    elements.authorManagerList.appendChild(emptyCard);
     return;
   }
 
   visibleEntries.forEach((entry, index) => {
-    const isBanned = status === 'banned';
-    const row = document.createElement('div');
-    row.className = isBanned
-      ? 'seaf-author-record-entry seaf-author-ban-entry'
-      : 'seaf-author-record-entry';
-    row.dataset.status = status;
+    const row = document.createElement('article');
+    row.className = 'seaf-author-record-entry seaf-author-manager-entry';
+    row.dataset.status = entry.status;
     row.dataset.authorRecordKey = entry.key;
 
-    const main = document.createElement('div');
-    main.className = isBanned
-      ? 'seaf-author-record-entry-main seaf-author-ban-entry-main'
-      : 'seaf-author-record-entry-main';
+    const head = document.createElement('div');
+    head.className = 'seaf-author-record-entry-main seaf-author-manager-entry-main';
 
-    const selectionLabel = document.createElement('label');
-    selectionLabel.className = isBanned
-      ? 'seaf-author-record-entry-select seaf-author-ban-entry-select'
-      : 'seaf-author-record-entry-select';
+    const leading = document.createElement('div');
+    leading.className = 'seaf-author-manager-entry-leading';
 
-    const check = document.createElement('input');
-    check.type = 'checkbox';
-    check.id = `seaf-author-${status}-check-${index}`;
-    check.className = isBanned
-      ? 'seaf-author-record-checkbox seaf-author-ban-checkbox'
-      : 'seaf-author-record-checkbox';
-    check.checked = selectedSet.has(entry.key);
-    selectionLabel.htmlFor = check.id;
-    check.addEventListener('change', () => {
-      toggleAuthorRecordSelection(state, status, entry.key, check.checked);
-      renderAuthorRecordManager(elements, state, status);
-    });
+    if (isSelectionMode) {
+      const selectionLabel = document.createElement('label');
+      selectionLabel.className = 'seaf-author-record-entry-select seaf-author-manager-entry-select';
+      const selectBox = document.createElement('input');
+      selectBox.type = 'checkbox';
+      selectBox.checked = selectedSet.has(entry.key);
+      selectBox.addEventListener('change', () => {
+        toggleAuthorRecordSelection(state, entry.key, selectBox.checked);
+        renderAuthorManager(elements, state);
+      });
+      const selectText = document.createElement('span');
+      selectText.textContent = '선택';
+      selectionLabel.append(selectBox, selectText);
+      leading.appendChild(selectionLabel);
+    }
 
     const copy = document.createElement('div');
-    copy.className = isBanned
-      ? 'seaf-author-record-entry-copy seaf-author-ban-entry-copy'
-      : 'seaf-author-record-entry-copy';
+    copy.className = 'seaf-author-record-entry-copy';
 
     const title = document.createElement('div');
-    title.className = isBanned
-      ? 'seaf-author-record-entry-title seaf-author-ban-entry-title'
-      : 'seaf-author-record-entry-title';
+    title.className = 'seaf-author-record-entry-title';
     title.textContent = entry.label || entry.displayName || entry.nickname
       || entry.uid || entry.ip || entry.value || entry.key;
 
     const meta = document.createElement('div');
-    meta.className = isBanned
-      ? 'seaf-author-record-entry-meta seaf-author-ban-entry-meta'
-      : 'seaf-author-record-entry-meta';
+    meta.className = 'seaf-author-record-entry-meta';
     meta.textContent = getAuthorRecordMeta(entry);
 
     copy.append(title, meta);
-    selectionLabel.append(check, copy);
+    leading.appendChild(copy);
 
-    const entryActions = document.createElement('div');
-    entryActions.className = 'seaf-author-record-entry-actions';
+    const actions = document.createElement('div');
+    actions.className = 'seaf-author-manager-entry-actions';
 
-    const swapButton = document.createElement('button');
-    swapButton.type = 'button';
-    swapButton.className = 'seaf-secondary-button seaf-author-swap-button';
-    swapButton.dataset.action = 'author-record-swap';
-    swapButton.textContent = isBanned
-      ? LABELS.authorRecordMoveToNote
-      : LABELS.authorRecordMoveToBan;
-    swapButton.addEventListener('click', async () => {
-      await moveAuthorRecordKeys(
-        [entry.key],
-        isBanned ? 'note' : 'banned',
-        state,
-        elements,
-        isBanned ? LABELS.authorRecordMovedToNote : LABELS.authorRecordMovedToBan
-      );
-    });
+    const banLabel = document.createElement('label');
+    banLabel.className = 'seaf-inline-check seaf-author-manager-row-toggle';
+    const banCheckbox = document.createElement('input');
+    banCheckbox.type = 'checkbox';
+    banCheckbox.checked = entry.status === 'banned';
+    const banText = document.createElement('span');
+    banText.textContent = '밴';
+    banLabel.append(banCheckbox, banText);
 
     const removeButton = document.createElement('button');
     removeButton.type = 'button';
     removeButton.className = 'seaf-secondary-button seaf-danger-button';
     removeButton.textContent = '삭제';
-    removeButton.addEventListener('click', async (event) => {
-      event.preventDefault();
-      await removeAuthorRecordKeys(
-        [entry.key],
-        state,
-        elements,
-        isBanned ? LABELS.authorBanRemoved : LABELS.authorNoteRemoved
-      );
-    });
 
-    entryActions.append(swapButton, removeButton);
-    main.append(selectionLabel, entryActions);
+    actions.append(banLabel, removeButton);
+    head.append(leading, actions);
+
+    const noteRow = document.createElement('div');
+    noteRow.className = 'seaf-author-record-note-row seaf-author-manager-note-row';
 
     const noteInput = document.createElement('input');
     noteInput.type = 'text';
-    noteInput.className = isBanned
-      ? 'seaf-text-input seaf-author-record-note-editor seaf-author-ban-note-editor'
-      : 'seaf-text-input seaf-author-record-note-editor';
-    noteInput.value = entry.note || '';
-    noteInput.placeholder = isBanned ? '메모 없음' : '메모를 입력하세요';
+    noteInput.className = 'seaf-text-input seaf-author-record-note-editor';
+    noteInput.value = getAuthorManagerDraftValue(state, entry.key, entry.note || '');
+    noteInput.placeholder = '메모';
     noteInput.maxLength = MAX_AUTHOR_NOTE_LENGTH;
     noteInput.dataset.authorRecordNoteKey = entry.key;
-    if (isBanned) {
-      noteInput.dataset.authorBanNoteKey = entry.key;
-    }
     noteInput.dataset.originalValue = entry.note || '';
     noteInput.setAttribute('aria-label', `${title.textContent} 메모`);
 
     const noteSaveButton = document.createElement('button');
     noteSaveButton.type = 'button';
-    noteSaveButton.className = isBanned
-      ? 'seaf-secondary-button seaf-author-record-note-save seaf-author-ban-note-save'
-      : 'seaf-secondary-button seaf-author-record-note-save';
+    noteSaveButton.className = 'seaf-secondary-button seaf-author-record-note-save';
     noteSaveButton.textContent = LABELS.authorRecordNoteSave;
     noteSaveButton.disabled = true;
 
+    noteRow.append(noteInput, noteSaveButton);
+
     const noteStatus = document.createElement('div');
-    noteStatus.className = isBanned
-      ? 'seaf-author-record-note-status seaf-author-ban-note-status'
-      : 'seaf-author-record-note-status';
+    noteStatus.className = 'seaf-author-record-note-status';
     noteStatus.setAttribute('role', 'status');
 
     const updateDirtyState = () => {
@@ -851,6 +789,18 @@ function renderAuthorRecordManager(elements, state, status) {
         return;
       }
 
+      const normalizedDraft = normalizeAuthorRecordNote(noteInput.value);
+      if (entry.status === 'note' && !normalizedDraft) {
+        noteStatus.textContent = LABELS.authorNoteRequired;
+        noteStatus.dataset.tone = 'error';
+        noteSaveButton.disabled = false;
+        state.ui.authorManagerDrafts = {
+          ...(state.ui.authorManagerDrafts || {}),
+          [entry.key]: noteInput.value
+        };
+        return;
+      }
+
       noteInput.disabled = true;
       noteSaveButton.disabled = true;
       noteStatus.textContent = LABELS.authorRecordNoteSaving;
@@ -862,9 +812,13 @@ function renderAuthorRecordManager(elements, state, status) {
         const savedNote = savedEntry?.note || '';
         noteInput.value = savedNote;
         noteInput.dataset.originalValue = savedNote;
-        noteStatus.textContent = isBanned ? LABELS.authorBanNoteSaved : LABELS.authorNoteUpdated;
+        if (state.ui?.authorManagerDrafts) {
+          delete state.ui.authorManagerDrafts[entry.key];
+        }
+        noteStatus.textContent = LABELS.authorNoteUpdated;
         noteStatus.dataset.tone = 'success';
         renderDashboard(elements, state);
+        renderAuthorManager(elements, state);
       } catch (error) {
         noteStatus.textContent = LABELS.authorRecordNoteSaveFailed;
         noteStatus.dataset.tone = 'error';
@@ -873,6 +827,32 @@ function renderAuthorRecordManager(elements, state, status) {
         noteInput.disabled = false;
       }
     };
+
+    banCheckbox.addEventListener('change', async () => {
+      banCheckbox.disabled = true;
+      removeButton.disabled = true;
+      try {
+        await moveAuthorRecordKeys(
+          [entry.key],
+          banCheckbox.checked ? 'banned' : 'note',
+          state,
+          elements,
+          banCheckbox.checked ? LABELS.authorRecordMovedToBan : LABELS.authorRecordMovedToNote
+        );
+      } finally {
+        renderAuthorManager(elements, state);
+      }
+    });
+
+    removeButton.addEventListener('click', async (event) => {
+      event.preventDefault();
+      await removeAuthorRecordKeys(
+        [entry.key],
+        state,
+        elements,
+        entry.status === 'banned' ? LABELS.authorBanRemoved : LABELS.authorNoteRemoved
+      );
+    });
 
     noteInput.addEventListener('input', updateDirtyState);
     noteSaveButton.addEventListener('click', saveNote);
@@ -886,49 +866,11 @@ function renderAuthorRecordManager(elements, state, status) {
         updateDirtyState();
       }
     });
+    updateDirtyState();
 
-    const noteRow = document.createElement('div');
-    noteRow.className = isBanned
-      ? 'seaf-author-record-note-row seaf-author-ban-note-row'
-      : 'seaf-author-record-note-row';
-    noteRow.append(noteInput, noteSaveButton);
-    row.append(main, noteRow, noteStatus);
-    config.list.appendChild(row);
+    row.append(head, noteRow, noteStatus);
+    elements.authorManagerList.appendChild(row);
   });
-}
-
-function getAuthorRecordManagerConfig(elements, status) {
-  if (status === 'banned') {
-    return {
-      status,
-      queryKey: 'authorBanQuery',
-      selectedKey: 'selectedAuthorBanKeys',
-      count: elements.authorBanCount,
-      searchInput: elements.authorBanSearchInput,
-      selectVisible: elements.authorBanSelectVisible,
-      moveSelectedButton: elements.authorBanMoveSelectedButton,
-      deleteSelectedButton: elements.authorBanDeleteSelectedButton,
-      clearAllButton: elements.authorBanClearAllButton,
-      list: elements.authorBanList,
-      emptyLabel: LABELS.authorBanEmpty,
-      emptyHint: `${LABELS.authorBanQuickAdd} 또는 직접 입력으로 등록하세요.`
-    };
-  }
-
-  return {
-    status,
-    queryKey: 'authorNoteQuery',
-    selectedKey: 'selectedAuthorNoteKeys',
-    count: elements.authorNoteCount,
-    searchInput: elements.authorNoteSearchInput,
-    selectVisible: elements.authorNoteSelectVisible,
-    moveSelectedButton: elements.authorNoteMoveSelectedButton,
-    deleteSelectedButton: elements.authorNoteDeleteSelectedButton,
-    clearAllButton: elements.authorNoteClearAllButton,
-    list: elements.authorNoteList,
-    emptyLabel: LABELS.authorNoteEmpty,
-    emptyHint: `${LABELS.authorNoteQuickAdd} 또는 직접 입력으로 등록하세요.`
-  };
 }
 
 function formatCount(value) {
@@ -1134,8 +1076,7 @@ function wireInteractions(elements, state) {
     await saveSettings(state, elements, LABELS.authorBanJoinConfirmSaved);
   });
 
-  wireAuthorRecordManager(elements, state, 'banned');
-  wireAuthorRecordManager(elements, state, 'note');
+  wireUnifiedAuthorManager(elements, state);
 
   elements.refreshButton.addEventListener('click', async () => {
     await refreshDashboard(state, elements, true);
@@ -1157,16 +1098,10 @@ function wireInteractions(elements, state) {
     renderSettingsVisibility(elements, state);
   });
 
-  elements.authorBanListToggleButton.addEventListener('click', () => {
-    state.ui.isAuthorBanListCollapsed = !state.ui.isAuthorBanListCollapsed;
+  elements.authorManagerToggleButton?.addEventListener('click', () => {
+    state.ui.isAuthorManagerCollapsed = !state.ui.isAuthorManagerCollapsed;
     persistUiState(state);
-    renderAuthorBanListVisibility(elements, state);
-  });
-
-  elements.authorNoteListToggleButton.addEventListener('click', () => {
-    state.ui.isAuthorNoteListCollapsed = !state.ui.isAuthorNoteListCollapsed;
-    persistUiState(state);
-    renderAuthorNoteListVisibility(elements, state);
+    renderAuthorManagerVisibility(elements, state);
   });
 
   elements.authorRecordUndoButton.addEventListener('click', async () => {
@@ -1183,99 +1118,85 @@ function wireInteractions(elements, state) {
   });
 }
 
-function wireAuthorRecordManager(elements, state, status) {
-  const config = getAuthorRecordManagerConfig(elements, status);
-  const input = status === 'banned' ? elements.authorBanInput : elements.authorNoteInput;
-  const noteInput = status === 'banned' ? elements.authorBanNoteInput : elements.authorNoteNoteInput;
-  const addButton = status === 'banned' ? elements.authorBanAddButton : elements.authorNoteAddButton;
-
-  addButton.addEventListener('click', async () => {
-    await addManualAuthorRecord(elements, state, status);
+function wireUnifiedAuthorManager(elements, state) {
+  elements.authorManagerAddButton?.addEventListener('click', async () => {
+    await addManagedAuthorRecord(elements, state);
   });
 
-  [input, noteInput].forEach((field) => {
-    field.addEventListener('keydown', async (event) => {
+  [elements.authorManagerNicknameInput, elements.authorManagerNoteInput].forEach((field) => {
+    field?.addEventListener('keydown', async (event) => {
       if (event.key !== 'Enter') {
         return;
       }
       event.preventDefault();
-      await addManualAuthorRecord(elements, state, status);
+      await addManagedAuthorRecord(elements, state);
     });
   });
 
-  config.searchInput.addEventListener('input', (event) => {
-    state.ui[config.queryKey] = String(event.target.value || '');
-    state.ui[config.selectedKey] = [];
-    renderAuthorRecordManager(elements, state, status);
+  elements.authorManagerSearchInput?.addEventListener('input', (event) => {
+    state.ui.authorManagerQuery = String(event.target.value || '');
+    state.ui.selectedAuthorRecordKeys = [];
+    renderAuthorManager(elements, state);
   });
 
-  config.selectVisible.addEventListener('change', () => {
-    const visibleKeys = getVisibleAuthorRecords(state, status).map((entry) => entry.key);
-    const selectedSet = new Set(state.ui[config.selectedKey] || []);
-    if (config.selectVisible.checked) {
+  elements.authorManagerFilterButtons.forEach((button) => {
+    button.addEventListener('click', () => {
+      state.ui.authorManagerFilter = button.dataset.filter || 'all';
+      state.ui.selectedAuthorRecordKeys = [];
+      renderAuthorManager(elements, state);
+    });
+  });
+
+  elements.authorManagerSelectionModeButton?.addEventListener('click', () => {
+    state.ui.authorManagerSelectionMode = !state.ui.authorManagerSelectionMode;
+    if (!state.ui.authorManagerSelectionMode) {
+      state.ui.selectedAuthorRecordKeys = [];
+    }
+    renderAuthorManager(elements, state);
+  });
+
+  elements.authorManagerSelectVisible?.addEventListener('change', () => {
+    const visibleKeys = getVisibleManagedAuthorRecords(state).map((entry) => entry.key);
+    const selectedSet = new Set(state.ui.selectedAuthorRecordKeys || []);
+    if (elements.authorManagerSelectVisible.checked) {
       visibleKeys.forEach((key) => selectedSet.add(key));
     } else {
       visibleKeys.forEach((key) => selectedSet.delete(key));
     }
-    state.ui[config.selectedKey] = [...selectedSet];
-    renderAuthorRecordManager(elements, state, status);
+    state.ui.selectedAuthorRecordKeys = [...selectedSet];
+    renderAuthorManager(elements, state);
   });
 
-  config.moveSelectedButton.addEventListener('click', async () => {
-    const keys = state.ui[config.selectedKey] || [];
+  elements.authorManagerBulkBanButton?.addEventListener('click', async () => {
+    const keys = state.ui.selectedAuthorRecordKeys || [];
     if (keys.length === 0) {
-      showTransientStatus(
-        elements.saveStatus,
-        status === 'banned' ? LABELS.authorBanNoSelection : LABELS.authorNoteNoSelection
-      );
+      showTransientStatus(elements.saveStatus, LABELS.authorManagerSelectionRequired);
       return;
     }
-    await moveAuthorRecordKeys(
-      keys,
-      status === 'banned' ? 'note' : 'banned',
-      state,
-      elements,
-      status === 'banned'
-        ? LABELS.authorRecordMoveSelectedToNote
-        : LABELS.authorRecordMoveSelectedToBan
-    );
+    await moveAuthorRecordKeys(keys, 'banned', state, elements, LABELS.authorManagerBulkBanned);
   });
 
-  config.deleteSelectedButton.addEventListener('click', async () => {
-    const keys = state.ui[config.selectedKey] || [];
+  elements.authorManagerBulkUnbanButton?.addEventListener('click', async () => {
+    const keys = state.ui.selectedAuthorRecordKeys || [];
     if (keys.length === 0) {
-      showTransientStatus(
-        elements.saveStatus,
-        status === 'banned' ? LABELS.authorBanNoSelection : LABELS.authorNoteNoSelection
-      );
+      showTransientStatus(elements.saveStatus, LABELS.authorManagerSelectionRequired);
       return;
     }
-    await removeAuthorRecordKeys(
-      keys,
-      state,
-      elements,
-      status === 'banned' ? LABELS.authorBanSelectedRemoved : LABELS.authorNoteSelectedRemoved
-    );
+    await moveAuthorRecordKeys(keys, 'note', state, elements, LABELS.authorManagerBulkUnbanned);
   });
 
-  config.clearAllButton.addEventListener('click', async () => {
-    const keys = getAuthorRecords(state)
-      .filter((entry) => entry.status === status)
-      .map((entry) => entry.key);
+  elements.authorManagerBulkDeleteButton?.addEventListener('click', async () => {
+    const keys = state.ui.selectedAuthorRecordKeys || [];
     if (keys.length === 0) {
+      showTransientStatus(elements.saveStatus, LABELS.authorManagerSelectionRequired);
       return;
     }
     if (!window.confirm(
-      status === 'banned' ? LABELS.authorBanClearAllConfirm : LABELS.authorNoteClearAllConfirm
+      LABELS.authorManagerBulkDeleteConfirm.replace('{count}', String(keys.length))
     )) {
       return;
     }
-    await removeAuthorRecordKeys(
-      keys,
-      state,
-      elements,
-      status === 'banned' ? LABELS.authorBanCleared : LABELS.authorNoteCleared
-    );
+    await removeAuthorRecordKeys(keys, state, elements, '선택한 작성자 기록을 삭제했습니다.');
   });
 }
 
@@ -1534,20 +1455,22 @@ function showTransientStatus(element, message) {
   }, 2200);
 }
 
-async function addManualAuthorRecord(elements, state, status) {
-  const isBanned = status === 'banned';
-  const nicknameInput = isBanned ? elements.authorBanInput : elements.authorNoteInput;
-  const noteInput = isBanned ? elements.authorBanNoteInput : elements.authorNoteNoteInput;
-  const nickname = String(nicknameInput.value || '').trim();
-  const note = normalizeAuthorRecordNote(noteInput.value);
+async function addManagedAuthorRecord(elements, state) {
+  const nicknameInput = elements.authorManagerNicknameInput;
+  const noteInput = elements.authorManagerNoteInput;
+  const isBanned = Boolean(elements.authorManagerBanToggle?.checked);
+  const nickname = String(nicknameInput?.value || '').trim();
+  const note = normalizeAuthorRecordNote(noteInput?.value);
+  const status = isBanned ? 'banned' : 'note';
+
   if (!nickname) {
     showTransientStatus(elements.saveStatus, LABELS.authorBanInvalid);
-    nicknameInput.focus();
+    nicknameInput?.focus();
     return;
   }
   if (!isBanned && !note) {
     showTransientStatus(elements.saveStatus, LABELS.authorNoteRequired);
-    noteInput.focus();
+    noteInput?.focus();
     return;
   }
 
@@ -1563,8 +1486,15 @@ async function addManualAuthorRecord(elements, state, status) {
 
   try {
     state.settings = await settingsClient.addAuthorRecord({ nickname, note, status });
-    nicknameInput.value = '';
-    noteInput.value = '';
+    if (nicknameInput) {
+      nicknameInput.value = '';
+    }
+    if (noteInput) {
+      noteInput.value = '';
+    }
+    if (elements.authorManagerBanToggle) {
+      elements.authorManagerBanToggle.checked = false;
+    }
     renderSettings(elements, state);
     renderDashboard(elements, state);
     showTransientStatus(elements.saveStatus, isBanned ? LABELS.authorBanSaved : LABELS.authorNoteSaved);
@@ -1662,9 +1592,7 @@ async function moveAuthorRecordKeys(keys, targetStatus, state, elements, message
   const previousStatus = movingRecords[0].status;
   try {
     state.settings = await settingsClient.setAuthorRecordStatus(movingKeys, targetStatus);
-    state.ui.selectedAuthorBanKeys = (state.ui.selectedAuthorBanKeys || [])
-      .filter((key) => !keySet.has(key));
-    state.ui.selectedAuthorNoteKeys = (state.ui.selectedAuthorNoteKeys || [])
+    state.ui.selectedAuthorRecordKeys = (state.ui.selectedAuthorRecordKeys || [])
       .filter((key) => !keySet.has(key));
     state.ui.authorRecordUndo = {
       keys: movingKeys,
@@ -1677,7 +1605,7 @@ async function moveAuthorRecordKeys(keys, targetStatus, state, elements, message
     renderDashboard(elements, state);
     showTransientStatus(elements.saveStatus, message);
     if (targetStatus === 'note') {
-      focusAuthorRecordNote(elements.authorNoteList, movingKeys[0]);
+      focusAuthorRecordNote(elements.authorManagerList, movingKeys[0]);
     }
     return true;
   } catch (error) {
@@ -1696,6 +1624,7 @@ async function undoLastAuthorRecordMove(state, elements) {
   renderAuthorRecordUndo(elements, state);
   try {
     state.settings = await settingsClient.setAuthorRecordStatus(undo.keys, undo.previousStatus);
+    state.ui.selectedAuthorRecordKeys = [];
     state.ui.authorRecordUndo = null;
     renderSettings(elements, state);
     renderDashboard(elements, state);
@@ -1725,10 +1654,14 @@ async function removeAuthorRecordKeys(keys, state, elements, message) {
 
   try {
     state.settings = await settingsClient.removeAuthorRecordKeys([...removeSet]);
-    state.ui.selectedAuthorBanKeys = (state.ui.selectedAuthorBanKeys || [])
+    state.ui.selectedAuthorRecordKeys = (state.ui.selectedAuthorRecordKeys || [])
       .filter((key) => !removeSet.has(key));
-    state.ui.selectedAuthorNoteKeys = (state.ui.selectedAuthorNoteKeys || [])
-      .filter((key) => !removeSet.has(key));
+    state.ui.authorManagerDeletedKeys = [...removeSet];
+    if (state.ui.authorManagerDrafts) {
+      removeSet.forEach((key) => {
+        delete state.ui.authorManagerDrafts[key];
+      });
+    }
     if (state.ui.authorRecordUndo?.keys?.some((key) => removeSet.has(key))) {
       state.ui.authorRecordUndo = null;
     }
@@ -1754,26 +1687,79 @@ function getAuthorRecordErrorMessage(error, fallbackMessage = LABELS.saveWithout
   return error?.message || fallbackMessage;
 }
 
-function toggleAuthorRecordSelection(state, status, key, isSelected) {
-  const selectedKey = status === 'banned' ? 'selectedAuthorBanKeys' : 'selectedAuthorNoteKeys';
-  const selectedSet = new Set(state.ui[selectedKey] || []);
+function toggleAuthorRecordSelection(state, key, isSelected) {
+  const selectedSet = new Set(state.ui.selectedAuthorRecordKeys || []);
   if (isSelected) {
     selectedSet.add(key);
   } else {
     selectedSet.delete(key);
   }
-  state.ui[selectedKey] = [...selectedSet];
+  state.ui.selectedAuthorRecordKeys = [...selectedSet];
 }
 
-function getVisibleAuthorRecords(state, status) {
-  const queryKey = status === 'banned' ? 'authorBanQuery' : 'authorNoteQuery';
-  const query = normalizeAuthorText(state.ui[queryKey] || '');
-  const entries = getAuthorRecords(state).filter((entry) => entry.status === status);
-  if (!query) {
-    return entries;
+function captureAuthorManagerDrafts(elements, state) {
+  const list = elements.authorManagerList;
+  if (!list || !state.ui) {
+    return;
   }
 
-  return entries.filter((entry) => {
+  const drafts = { ...(state.ui.authorManagerDrafts || {}) };
+  const deletedKeys = new Set(state.ui.authorManagerDeletedKeys || []);
+  list.querySelectorAll('[data-author-record-key]').forEach((row) => {
+    const key = String(row.getAttribute('data-author-record-key') || '').trim();
+    if (!key) {
+      return;
+    }
+    if (deletedKeys.has(key)) {
+      delete drafts[key];
+      return;
+    }
+    const noteInput = row.querySelector('.seaf-author-record-note-editor');
+    if (!noteInput) {
+      return;
+    }
+    const currentValue = String(noteInput.value || '');
+    const originalValue = String(noteInput.dataset.originalValue || '');
+    if (currentValue !== originalValue) {
+      drafts[key] = currentValue;
+    } else if (Object.prototype.hasOwnProperty.call(drafts, key)) {
+      delete drafts[key];
+    }
+  });
+  state.ui.authorManagerDrafts = drafts;
+  state.ui.authorManagerDeletedKeys = [];
+}
+
+function getAuthorManagerDraftValue(state, key, fallbackValue) {
+  if (!state.ui?.authorManagerDrafts) {
+    return fallbackValue;
+  }
+  return Object.prototype.hasOwnProperty.call(state.ui.authorManagerDrafts, key)
+    ? state.ui.authorManagerDrafts[key]
+    : fallbackValue;
+}
+
+function getVisibleManagedAuthorRecords(state) {
+  const query = normalizeAuthorText(state.ui.authorManagerQuery || '');
+  const activeFilter = state.ui.authorManagerFilter || 'all';
+  return getAuthorRecords(state).filter((entry) => {
+    if (activeFilter === 'banned' && entry.status !== 'banned') {
+      return false;
+    }
+    if (activeFilter === 'note' && entry.status !== 'note') {
+      return false;
+    }
+    if (activeFilter === 'empty-note' && normalizeAuthorRecordNote(entry.note)) {
+      return false;
+    }
+    if (activeFilter === 'empty-note' && entry.status !== 'note') {
+      return false;
+    }
+
+    if (!query) {
+      return true;
+    }
+
     const haystacks = [
       entry.displayName,
       entry.label,

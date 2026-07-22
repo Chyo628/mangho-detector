@@ -885,63 +885,116 @@ test('popup restores collapsed settings panel from localStorage', async () => {
   }
 });
 
-test('popup renders the ban manager as a separate section from settings', async () => {
+test('popup renders the unified author manager as a separate section from settings', async () => {
   const handle = setupPopupTest();
 
   try {
     await handle.settle();
 
     const settingsBody = document.getElementById('seaf-settings-body');
-    const authorBanPanel = document.getElementById('seaf-author-ban-panel');
+    const authorManagerPanel = document.getElementById('seaf-author-manager-panel');
 
-    assert.equal(settingsBody.contains(authorBanPanel), false);
-    assert.equal(document.getElementById('seaf-author-ban-title').textContent, '밴 목록');
-    assert.equal(authorBanPanel.parentElement, document.querySelector('.seaf-main'));
+    assert.equal(settingsBody.contains(authorManagerPanel), false);
+    assert.equal(document.getElementById('seaf-author-manager-title').textContent, '작성자 관리');
+    assert.equal(authorManagerPanel.parentElement, document.querySelector('.seaf-main'));
+    assert.match(authorManagerPanel.textContent, /경고 배너 표시/);
   } finally {
     handle.cleanup();
   }
 });
 
-test('popup collapses only the ban roster and persists the state', async () => {
+test('popup collapses the unified author manager and persists the state', async () => {
   const handle = setupPopupTest();
 
   try {
     await handle.settle();
 
-    const toggleButton = document.getElementById('seaf-author-ban-list-toggle-button');
-    const rosterBody = document.getElementById('seaf-author-ban-roster-body');
-    const compose = document.querySelector('.seaf-author-ban-compose');
+    const style = document.createElement('style');
+    style.textContent = loadHtml('popup/popup.css');
+    document.head.appendChild(style);
 
-    assert.equal(rosterBody.hidden, false);
+    const toggleButton = document.getElementById('seaf-author-manager-toggle-button');
+    const body = document.getElementById('seaf-author-manager-body');
+
+    assert.equal(body.hidden, false);
+    assert.equal(window.getComputedStyle(body).display, 'grid');
     assert.equal(toggleButton.textContent, '접기');
 
     toggleButton.dispatchEvent(new window.Event('click', { bubbles: true }));
 
-    assert.equal(rosterBody.hidden, true);
+    assert.equal(body.hidden, true);
+    assert.equal(window.getComputedStyle(body).display, 'none');
     assert.equal(toggleButton.textContent, '펼치기');
     assert.equal(toggleButton.getAttribute('aria-expanded'), 'false');
-    assert.equal(compose.hidden, false);
-    assert.equal(window.localStorage.getItem('seaf_popup_author_ban_list_collapsed'), 'true');
+    assert.equal(window.localStorage.getItem('seaf_popup_author_manager_collapsed'), 'true');
+
+    toggleButton.dispatchEvent(new window.Event('click', { bubbles: true }));
+
+    assert.equal(body.hidden, false);
+    assert.equal(window.getComputedStyle(body).display, 'grid');
+    assert.equal(toggleButton.textContent, '접기');
+    assert.equal(toggleButton.getAttribute('aria-expanded'), 'true');
+    assert.equal(window.localStorage.getItem('seaf_popup_author_manager_collapsed'), 'false');
   } finally {
     handle.cleanup();
   }
 });
 
-test('popup restores the collapsed ban roster from localStorage', async () => {
+test('popup restores the collapsed author manager from current and legacy localStorage keys', async () => {
   const handle = setupPopupTest({
     beforeLoad(windowHandle) {
       windowHandle.localStorage.setItem('seaf_popup_author_ban_list_collapsed', 'true');
+      windowHandle.localStorage.setItem('seaf_popup_author_note_list_collapsed', 'true');
     }
   });
 
   try {
     await handle.settle();
 
-    assert.equal(document.getElementById('seaf-author-ban-roster-body').hidden, true);
-    assert.equal(document.getElementById('seaf-author-ban-list-toggle-button').textContent, '펼치기');
-    assert.equal(document.querySelector('.seaf-author-ban-compose').hidden, false);
+    assert.equal(document.getElementById('seaf-author-manager-body').hidden, true);
+    assert.equal(document.getElementById('seaf-author-manager-toggle-button').textContent, '펼치기');
   } finally {
     handle.cleanup();
+  }
+});
+
+test('popup keeps the explicit author manager key after legacy collapse migration', async () => {
+  const handle = setupPopupTest({
+    beforeLoad(windowHandle) {
+      windowHandle.localStorage.setItem('seaf_popup_author_ban_list_collapsed', 'true');
+      windowHandle.localStorage.setItem('seaf_popup_author_note_list_collapsed', 'true');
+    }
+  });
+
+  try {
+    await handle.settle();
+
+    document.getElementById('seaf-author-manager-toggle-button')
+      .dispatchEvent(new window.Event('click', { bubbles: true }));
+
+    assert.equal(window.localStorage.getItem('seaf_popup_author_manager_collapsed'), 'false');
+    handle.cleanup();
+
+    const reloadedHandle = setupPopupTest({
+      beforeLoad(windowHandle) {
+        windowHandle.localStorage.setItem('seaf_popup_author_ban_list_collapsed', 'true');
+        windowHandle.localStorage.setItem('seaf_popup_author_note_list_collapsed', 'true');
+        windowHandle.localStorage.setItem('seaf_popup_author_manager_collapsed', 'false');
+      }
+    });
+
+    try {
+      await reloadedHandle.settle();
+      assert.equal(document.getElementById('seaf-author-manager-body').hidden, false);
+      assert.equal(document.getElementById('seaf-author-manager-toggle-button').textContent, '접기');
+    } finally {
+      reloadedHandle.cleanup();
+    }
+    return;
+  } finally {
+    try {
+      handle.cleanup();
+    } catch {}
   }
 });
 
@@ -1016,46 +1069,47 @@ test('popup renders zero unread while retained history still remains visible', a
   }
 });
 
-test('popup keeps banned authors and author notes in separate independently collapsible sections', async () => {
+test('popup renders one unified list with status counts and filters', async () => {
   const banned = domain.createNicknameAuthorRecord('BannedUser', '주의', 'banned');
   const noted = domain.createNicknameAuthorRecord('NotedUser', '좋은 팀원', 'note');
+  const emptyNote = domain.createNicknameAuthorRecord('QuietUser', '', 'note');
   const handle = setupPopupTest({
     storageData: {
-      seaf_settings: { authorRecords: [banned, noted] }
+      seaf_settings: { authorRecords: [banned, noted, emptyNote] }
     }
   });
 
   try {
     await handle.settle();
 
-    assert.equal(document.getElementById('seaf-author-ban-count').textContent, '1개');
-    assert.equal(document.getElementById('seaf-author-note-count').textContent, '1개');
-    assert.match(document.getElementById('seaf-author-ban-list').textContent, /BannedUser/);
-    assert.doesNotMatch(document.getElementById('seaf-author-ban-list').textContent, /NotedUser/);
-    assert.match(document.getElementById('seaf-author-note-list').textContent, /NotedUser/);
-    assert.doesNotMatch(document.getElementById('seaf-author-note-list').textContent, /BannedUser/);
+    assert.equal(document.getElementById('seaf-author-manager-count').textContent, '전체 3 · 밴 1 · 메모 2');
+    assert.match(document.getElementById('seaf-author-manager-list').textContent, /BannedUser/);
+    assert.match(document.getElementById('seaf-author-manager-list').textContent, /NotedUser/);
 
-    document.getElementById('seaf-author-note-list-toggle-button')
+    document.querySelector('[data-filter="banned"]')
       .dispatchEvent(new window.Event('click', { bubbles: true }));
+    assert.match(document.getElementById('seaf-author-manager-list').textContent, /BannedUser/);
+    assert.doesNotMatch(document.getElementById('seaf-author-manager-list').textContent, /NotedUser/);
 
-    assert.equal(document.getElementById('seaf-author-note-roster-body').hidden, true);
-    assert.equal(document.getElementById('seaf-author-ban-roster-body').hidden, false);
-    assert.equal(window.localStorage.getItem('seaf_popup_author_note_list_collapsed'), 'true');
+    document.querySelector('[data-filter="empty-note"]')
+      .dispatchEvent(new window.Event('click', { bubbles: true }));
+    assert.match(document.getElementById('seaf-author-manager-list').textContent, /QuietUser/);
+    assert.doesNotMatch(document.getElementById('seaf-author-manager-list').textContent, /BannedUser/);
   } finally {
     handle.cleanup();
   }
 });
 
-test('popup requires a note for manual author-note creation and preserves rejected input', async () => {
+test('popup requires a note for general author creation and preserves rejected input', async () => {
   const handle = setupPopupTest();
 
   try {
     await handle.settle();
 
-    const nicknameInput = document.getElementById('seaf-author-note-input');
-    const noteInput = document.getElementById('seaf-author-note-note-input');
+    const nicknameInput = document.getElementById('seaf-author-manager-nickname-input');
+    const noteInput = document.getElementById('seaf-author-manager-note-input');
     nicknameInput.value = 'Alpha';
-    document.getElementById('seaf-author-note-add-button')
+    document.getElementById('seaf-author-manager-add-button')
       .dispatchEvent(new window.Event('click', { bubbles: true }));
     await handle.settle();
 
@@ -1072,15 +1126,14 @@ test('popup requires a note for manual author-note creation and preserves reject
       getStoredAuthorRecords(handle).map((record) => ({ key: record.key, status: record.status, note: record.note })),
       [{ key: 'nickname:Alpha', status: 'note', note }]
     );
-    assert.equal(document.getElementById('seaf-author-ban-count').textContent, '0개');
-    assert.equal(document.getElementById('seaf-author-note-count').textContent, '1개');
+    assert.equal(document.getElementById('seaf-author-manager-count').textContent, '전체 1 · 밴 0 · 메모 1');
     assert.equal(document.querySelector('[data-author-note-injected="true"]'), null);
   } finally {
     handle.cleanup();
   }
 });
 
-test('popup bulk-swaps only searched author notes and undo restores their status', async () => {
+test('popup bulk-bans only searched records in selection mode and undo restores their status', async () => {
   const records = [
     domain.createNicknameAuthorRecord('Alpha', 'alpha', 'note'),
     domain.createNicknameAuthorRecord('Beta', 'beta', 'note'),
@@ -1094,13 +1147,15 @@ test('popup bulk-swaps only searched author notes and undo restores their status
   try {
     await handle.settle();
 
-    const searchInput = document.getElementById('seaf-author-note-search-input');
+    const searchInput = document.getElementById('seaf-author-manager-search-input');
     searchInput.value = 'beta';
     searchInput.dispatchEvent(new window.Event('input', { bubbles: true }));
-    const selectVisible = document.getElementById('seaf-author-note-select-visible');
+    document.getElementById('seaf-author-manager-selection-mode-button')
+      .dispatchEvent(new window.Event('click', { bubbles: true }));
+    const selectVisible = document.getElementById('seaf-author-manager-select-visible');
     selectVisible.checked = true;
     selectVisible.dispatchEvent(new window.Event('change', { bubbles: true }));
-    document.getElementById('seaf-author-note-move-selected-button')
+    document.getElementById('seaf-author-manager-bulk-ban-button')
       .dispatchEvent(new window.Event('click', { bubbles: true }));
     await handle.settle();
 
@@ -1113,8 +1168,7 @@ test('popup bulk-swaps only searched author notes and undo restores their status
         ['nickname:Zeta', 'banned']
       ]
     );
-    assert.equal(document.getElementById('seaf-author-note-search-input').value, 'beta');
-    assert.equal(document.getElementById('seaf-author-ban-search-input').value, '');
+    assert.equal(document.getElementById('seaf-author-manager-search-input').value, 'beta');
     assert.equal(document.getElementById('seaf-author-record-undo').hidden, false);
 
     document.getElementById('seaf-author-record-undo-button')
@@ -1145,20 +1199,56 @@ test('popup keeps unsaved note text and selection when a bulk status swap fails'
   try {
     await handle.settle();
 
-    const checkbox = document.querySelector('#seaf-author-note-list .seaf-author-record-checkbox');
+    document.getElementById('seaf-author-manager-selection-mode-button')
+      .dispatchEvent(new window.Event('click', { bubbles: true }));
+    const checkbox = document.querySelector('#seaf-author-manager-list .seaf-author-manager-entry-select input');
     checkbox.checked = true;
     checkbox.dispatchEvent(new window.Event('change', { bubbles: true }));
-    const noteInput = document.querySelector('#seaf-author-note-list .seaf-author-record-note-editor');
+    const noteInput = document.querySelector('#seaf-author-manager-list .seaf-author-record-note-editor');
     noteInput.value = 'unsaved note text';
     noteInput.dispatchEvent(new window.Event('input', { bubbles: true }));
-    document.getElementById('seaf-author-note-move-selected-button')
+    document.getElementById('seaf-author-manager-bulk-ban-button')
       .dispatchEvent(new window.Event('click', { bubbles: true }));
     await handle.settle();
 
     assert.equal(noteInput.value, 'unsaved note text');
-    assert.equal(document.querySelector('#seaf-author-note-list .seaf-author-record-checkbox').checked, true);
+    assert.equal(document.querySelector('#seaf-author-manager-list .seaf-author-manager-entry-select input').checked, true);
     assert.equal(getStoredAuthorRecords(handle)[0].status, 'note');
     assert.match(document.getElementById('seaf-save-status').textContent, /write failed/);
+  } finally {
+    handle.cleanup();
+  }
+});
+
+test('popup keeps unsaved note text when a row ban toggle fails', async () => {
+  const record = domain.createNicknameAuthorRecord('Alpha', 'saved note', 'note');
+  const handle = setupPopupTest({
+    storageData: { seaf_settings: { authorRecords: [record] } },
+    runtimeSendMessage(message) {
+      if (message.type === 'SET_AUTHOR_RECORD_STATUS') {
+        return { success: false, errorCode: 'WRITE_FAILED', error: 'write failed' };
+      }
+      return undefined;
+    }
+  });
+
+  try {
+    await handle.settle();
+
+    const row = document.querySelector('#seaf-author-manager-list .seaf-author-record-entry');
+    const noteInput = row.querySelector('.seaf-author-record-note-editor');
+    noteInput.value = 'row toggle draft';
+    noteInput.dispatchEvent(new window.Event('input', { bubbles: true }));
+
+    const banToggle = row.querySelector('.seaf-author-manager-row-toggle input');
+    banToggle.checked = true;
+    banToggle.dispatchEvent(new window.Event('change', { bubbles: true }));
+    await handle.settle();
+
+    const refreshedRow = document.querySelector('#seaf-author-manager-list .seaf-author-record-entry');
+    assert.equal(refreshedRow.querySelector('.seaf-author-record-note-editor').value, 'row toggle draft');
+    assert.equal(refreshedRow.querySelector('.seaf-author-manager-row-toggle input').checked, false);
+    assert.equal(getStoredAuthorRecords(handle)[0].status, 'note');
   } finally {
     handle.cleanup();
   }
@@ -1196,7 +1286,7 @@ test('popup quick note add and edit never enables banned-author join treatment',
   }
 });
 
-test('popup edits an author-note inline and deletes it without touching banned records', async () => {
+test('popup edits a managed note inline and deletes it without touching banned records', async () => {
   const noted = domain.createNicknameAuthorRecord('Alpha', 'old note', 'note');
   const banned = domain.createNicknameAuthorRecord('Bravo', 'keep banned', 'banned');
   const handle = setupPopupTest({
@@ -1206,9 +1296,10 @@ test('popup edits an author-note inline and deletes it without touching banned r
   try {
     await handle.settle();
 
-    const row = document.querySelector('#seaf-author-note-list .seaf-author-record-entry');
+    const row = [...document.querySelectorAll('#seaf-author-manager-list .seaf-author-record-entry')]
+      .find((candidate) => candidate.textContent.includes('Alpha'));
     const noteInput = row.querySelector('.seaf-author-record-note-editor');
-    noteInput.value = '';
+    noteInput.value = 'updated note';
     noteInput.dispatchEvent(new window.Event('input', { bubbles: true }));
     row.querySelector('.seaf-author-record-note-save')
       .dispatchEvent(new window.Event('click', { bubbles: true }));
@@ -1217,9 +1308,11 @@ test('popup edits an author-note inline and deletes it without touching banned r
     const savedNoteRecord = getStoredAuthorRecords(handle)
       .find((record) => record.key === noted.key);
     assert.equal(savedNoteRecord.status, 'note');
-    assert.equal(Object.hasOwn(savedNoteRecord, 'note'), false);
+    assert.equal(savedNoteRecord.note, 'updated note');
 
-    row.querySelector('.seaf-author-record-entry-actions .seaf-danger-button')
+    const refreshedRow = [...document.querySelectorAll('#seaf-author-manager-list .seaf-author-record-entry')]
+      .find((candidate) => candidate.textContent.includes('Alpha'));
+    refreshedRow.querySelector('.seaf-danger-button')
       .dispatchEvent(new window.Event('click', { bubbles: true }));
     await handle.settle();
 
@@ -1227,21 +1320,79 @@ test('popup edits an author-note inline and deletes it without touching banned r
       getStoredAuthorRecords(handle).map((record) => [record.key, record.status, record.note]),
       [[banned.key, 'banned', 'keep banned']]
     );
-    assert.equal(document.getElementById('seaf-author-note-count').textContent, '0개');
-    assert.equal(document.getElementById('seaf-author-ban-count').textContent, '1개');
+    assert.equal(document.getElementById('seaf-author-manager-count').textContent, '전체 1 · 밴 1 · 메모 0');
   } finally {
     handle.cleanup();
   }
 });
 
-test('popup adds manual nickname author bans with Enter and blocks duplicates', async () => {
+test('popup clears deleted author drafts so re-adding the same key does not revive old input', async () => {
+  const noted = domain.createNicknameAuthorRecord('Alpha', 'saved note', 'note');
+  const handle = setupPopupTest({
+    storageData: { seaf_settings: { authorRecords: [noted] } }
+  });
+
+  try {
+    await handle.settle();
+
+    const row = document.querySelector('#seaf-author-manager-list .seaf-author-record-entry');
+    const noteInput = row.querySelector('.seaf-author-record-note-editor');
+    noteInput.value = 'stale draft';
+    noteInput.dispatchEvent(new window.Event('input', { bubbles: true }));
+    row.querySelector('.seaf-danger-button')
+      .dispatchEvent(new window.Event('click', { bubbles: true }));
+    await handle.settle();
+
+    const nicknameInput = document.getElementById('seaf-author-manager-nickname-input');
+    const managerNoteInput = document.getElementById('seaf-author-manager-note-input');
+    nicknameInput.value = 'Alpha';
+    managerNoteInput.value = 'fresh note';
+    document.getElementById('seaf-author-manager-add-button')
+      .dispatchEvent(new window.Event('click', { bubbles: true }));
+    await handle.settle();
+
+    const refreshedRow = document.querySelector('#seaf-author-manager-list .seaf-author-record-entry');
+    assert.equal(refreshedRow.querySelector('.seaf-author-record-note-editor').value, 'fresh note');
+    assert.equal(getStoredAuthorRecords(handle)[0].note, 'fresh note');
+  } finally {
+    handle.cleanup();
+  }
+});
+
+test('popup blocks saving an empty note for general author records and preserves the draft', async () => {
+  const noted = domain.createNicknameAuthorRecord('Alpha', 'old note', 'note');
+  const handle = setupPopupTest({
+    storageData: { seaf_settings: { authorRecords: [noted] } }
+  });
+
+  try {
+    await handle.settle();
+
+    const row = document.querySelector('#seaf-author-manager-list .seaf-author-record-entry');
+    const noteInput = row.querySelector('.seaf-author-record-note-editor');
+    noteInput.value = '';
+    noteInput.dispatchEvent(new window.Event('input', { bubbles: true }));
+    row.querySelector('.seaf-author-record-note-save')
+      .dispatchEvent(new window.Event('click', { bubbles: true }));
+    await handle.settle();
+
+    assert.equal(noteInput.value, '');
+    assert.equal(getStoredAuthorRecords(handle)[0].note, 'old note');
+    assert.match(row.querySelector('.seaf-author-record-note-status').textContent, /메모를 입력/);
+  } finally {
+    handle.cleanup();
+  }
+});
+
+test('popup adds manual banned nicknames with Enter and blocks duplicates', async () => {
   const handle = setupPopupTest();
 
   try {
     await handle.settle();
 
-    const input = document.getElementById('seaf-author-ban-input');
-    const noteInput = document.getElementById('seaf-author-ban-note-input');
+    const input = document.getElementById('seaf-author-manager-nickname-input');
+    const noteInput = document.getElementById('seaf-author-manager-note-input');
+    document.getElementById('seaf-author-manager-ban-toggle').checked = true;
     input.value = '\uB9DD\uD638';
     noteInput.value = '  \uBC18\uBCF5   \uD3ED\uACA9 \uC720\uB3C4  ';
     noteInput.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
@@ -1250,10 +1401,12 @@ test('popup adds manual nickname author bans with Enter and blocks duplicates', 
     assert.equal(getStoredAuthorRecords(handle).length, 1);
     assert.equal(getStoredAuthorRecords(handle)[0].key, 'nickname:\uB9DD\uD638');
     assert.equal(getStoredAuthorRecords(handle)[0].note, '\uBC18\uBCF5 \uD3ED\uACA9 \uC720\uB3C4');
-    assert.equal(document.getElementById('seaf-author-ban-count').textContent, '1개');
+    assert.equal(document.getElementById('seaf-author-manager-count').textContent, '전체 1 · 밴 1 · 메모 0');
     assert.equal(input.value, '');
     assert.equal(noteInput.value, '');
+    assert.equal(document.getElementById('seaf-author-manager-ban-toggle').checked, false);
 
+    document.getElementById('seaf-author-manager-ban-toggle').checked = true;
     input.value = '\uB9DD\uD638';
     input.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     await handle.settle();
@@ -1265,13 +1418,13 @@ test('popup adds manual nickname author bans with Enter and blocks duplicates', 
   }
 });
 
-test('popup edits and searches author ban notes without rendering note HTML', async () => {
+test('popup edits and searches managed notes without rendering note HTML', async () => {
   const handle = setupPopupTest({
     storageData: {
       seaf_settings: {
-        authorBanEntries: [
-          domain.createNicknameAuthorBanEntry('Alpha'),
-          domain.createNicknameAuthorBanEntry('Beta')
+        authorRecords: [
+          domain.createNicknameAuthorRecord('Alpha', '', 'banned'),
+          domain.createNicknameAuthorRecord('Beta', '', 'banned')
         ]
       }
     }
@@ -1281,29 +1434,31 @@ test('popup edits and searches author ban notes without rendering note HTML', as
     await handle.settle();
 
     const note = '<img data-author-ban-note-injected="true"> \uD3ED\uACA9 \uC720\uB3C4';
-    const noteInput = document.querySelector('[data-author-ban-note-key="nickname:Alpha"]');
+    const row = [...document.querySelectorAll('#seaf-author-manager-list .seaf-author-record-entry')]
+      .find((candidate) => candidate.textContent.includes('Alpha'));
+    const noteInput = row.querySelector('.seaf-author-record-note-editor');
     noteInput.value = note;
     noteInput.dispatchEvent(new window.Event('input', { bubbles: true }));
-    assert.match(noteInput.closest('.seaf-author-ban-entry').textContent, /\uC800\uC7A5\uB418\uC9C0 \uC54A\uC740 \uBCC0\uACBD/);
-    noteInput.closest('.seaf-author-ban-entry').querySelector('.seaf-author-ban-note-save')
+    assert.match(row.textContent, /\uC800\uC7A5\uB418\uC9C0 \uC54A\uC740 \uBCC0\uACBD/);
+    row.querySelector('.seaf-author-record-note-save')
       .dispatchEvent(new window.Event('click', { bubbles: true }));
     await handle.settle();
 
     assert.equal(getStoredAuthorRecords(handle)[0].note, note);
     assert.equal(document.querySelector('[data-author-ban-note-injected="true"]'), null);
 
-    const searchInput = document.getElementById('seaf-author-ban-search-input');
+    const searchInput = document.getElementById('seaf-author-manager-search-input');
     searchInput.value = '\uD3ED\uACA9 \uC720\uB3C4';
     searchInput.dispatchEvent(new window.Event('input', { bubbles: true }));
 
-    const visibleRows = [...document.querySelectorAll('.seaf-author-ban-entry')];
+    const visibleRows = [...document.querySelectorAll('.seaf-author-manager-entry')];
     assert.equal(visibleRows.length, 1);
     assert.match(visibleRows[0].textContent, /Alpha/);
 
-    const visibleNoteInput = visibleRows[0].querySelector('.seaf-author-ban-note-editor');
+    const visibleNoteInput = visibleRows[0].querySelector('.seaf-author-record-note-editor');
     visibleNoteInput.value = '';
     visibleNoteInput.dispatchEvent(new window.Event('input', { bubbles: true }));
-    visibleRows[0].querySelector('.seaf-author-ban-note-save')
+    visibleRows[0].querySelector('.seaf-author-record-note-save')
       .dispatchEvent(new window.Event('click', { bubbles: true }));
     await handle.settle();
 
@@ -1326,51 +1481,57 @@ test('popup confirms broad anonymous nickname before adding it', async () => {
   try {
     await handle.settle();
 
-    const input = document.getElementById('seaf-author-ban-input');
+    const input = document.getElementById('seaf-author-manager-nickname-input');
+    document.getElementById('seaf-author-manager-ban-toggle').checked = true;
     input.value = '\u3147\u3147';
-    document.getElementById('seaf-author-ban-add-button')
+    document.getElementById('seaf-author-manager-add-button')
       .dispatchEvent(new window.Event('click', { bubbles: true }));
     await handle.settle();
 
     assert.equal(getStoredAuthorRecords(handle).length, 0);
-    assert.equal(document.getElementById('seaf-author-ban-count').textContent, '0개');
+    assert.equal(document.getElementById('seaf-author-manager-count').textContent, '전체 0 · 밴 0 · 메모 0');
   } finally {
     handle.cleanup();
   }
 });
 
-test('popup filters, selects, and deletes searched author bans without touching unread or recent storage', async () => {
+test('popup filters, selects, and deletes searched author records without touching unread or recent storage', async () => {
   const handle = setupPopupTest({
     storageData: {
       seaf_settings: {
-        authorBanEntries: [
-          domain.createNicknameAuthorBanEntry('Alpha'),
-          domain.createNicknameAuthorBanEntry('Beta'),
-          domain.createNicknameAuthorBanEntry('Betamax')
+        authorRecords: [
+          domain.createNicknameAuthorRecord('Alpha', 'alpha', 'banned'),
+          domain.createNicknameAuthorRecord('Beta', 'beta', 'banned'),
+          domain.createNicknameAuthorRecord('Betamax', 'betamax', 'banned')
         ]
       },
       seaf_unread_post_ids: [100],
       seaf_recent_posts: [{ id: 99, title: 'keep', detectedAt: Date.now() }]
+    },
+    beforeLoad(windowHandle) {
+      windowHandle.confirm = () => true;
     }
   });
 
   try {
     await handle.settle();
 
-    const searchInput = document.getElementById('seaf-author-ban-search-input');
+    const searchInput = document.getElementById('seaf-author-manager-search-input');
     searchInput.value = 'beta';
     searchInput.dispatchEvent(new window.Event('input', { bubbles: true }));
+    document.getElementById('seaf-author-manager-selection-mode-button')
+      .dispatchEvent(new window.Event('click', { bubbles: true }));
 
-    const visibleRows = [...document.querySelectorAll('.seaf-author-ban-entry')];
+    const visibleRows = [...document.querySelectorAll('.seaf-author-manager-entry')];
     assert.equal(visibleRows.length, 2);
-    assert.equal(document.getElementById('seaf-author-ban-select-visible').checked, false);
+    assert.equal(document.getElementById('seaf-author-manager-select-visible').checked, false);
 
-    const selectVisible = document.getElementById('seaf-author-ban-select-visible');
+    const selectVisible = document.getElementById('seaf-author-manager-select-visible');
     selectVisible.checked = true;
     selectVisible.dispatchEvent(new window.Event('change', { bubbles: true }));
     await handle.settle();
 
-    document.getElementById('seaf-author-ban-delete-selected-button')
+    document.getElementById('seaf-author-manager-bulk-delete-button')
       .dispatchEvent(new window.Event('click', { bubbles: true }));
     await handle.settle();
 
@@ -1386,11 +1547,49 @@ test('popup filters, selects, and deletes searched author bans without touching 
   }
 });
 
-test('popup renders an unmatched author-ban search query as text instead of HTML', async () => {
+test('popup keeps selection and draft state when bulk delete is cancelled', async () => {
+  const records = [
+    domain.createNicknameAuthorRecord('Alpha', 'alpha', 'banned'),
+    domain.createNicknameAuthorRecord('Beta', 'beta', 'banned')
+  ];
+  const handle = setupPopupTest({
+    storageData: { seaf_settings: { authorRecords: records } },
+    beforeLoad(windowHandle) {
+      windowHandle.confirm = () => false;
+    }
+  });
+
+  try {
+    await handle.settle();
+
+    document.getElementById('seaf-author-manager-selection-mode-button')
+      .dispatchEvent(new window.Event('click', { bubbles: true }));
+    const row = [...document.querySelectorAll('#seaf-author-manager-list .seaf-author-record-entry')]
+      .find((candidate) => candidate.textContent.includes('Beta'));
+    const checkbox = row.querySelector('.seaf-author-manager-entry-select input');
+    checkbox.checked = true;
+    checkbox.dispatchEvent(new window.Event('change', { bubbles: true }));
+    const noteInput = row.querySelector('.seaf-author-record-note-editor');
+    noteInput.value = 'beta draft';
+    noteInput.dispatchEvent(new window.Event('input', { bubbles: true }));
+
+    document.getElementById('seaf-author-manager-bulk-delete-button')
+      .dispatchEvent(new window.Event('click', { bubbles: true }));
+    await handle.settle();
+
+    assert.equal(checkbox.checked, true);
+    assert.equal(noteInput.value, 'beta draft');
+    assert.equal(getStoredAuthorRecords(handle).length, 2);
+  } finally {
+    handle.cleanup();
+  }
+});
+
+test('popup renders an unmatched author-manager search query as text instead of HTML', async () => {
   const handle = setupPopupTest({
     storageData: {
       seaf_settings: {
-        authorBanEntries: [domain.createNicknameAuthorBanEntry('Alpha')]
+        authorRecords: [domain.createNicknameAuthorRecord('Alpha', 'saved', 'banned')]
       }
     }
   });
@@ -1399,46 +1598,12 @@ test('popup renders an unmatched author-ban search query as text instead of HTML
     await handle.settle();
 
     const query = '<img data-author-ban-injected="true">';
-    const searchInput = document.getElementById('seaf-author-ban-search-input');
+    const searchInput = document.getElementById('seaf-author-manager-search-input');
     searchInput.value = query;
     searchInput.dispatchEvent(new window.Event('input', { bubbles: true }));
 
     assert.equal(document.querySelector('[data-author-ban-injected="true"]'), null);
-    assert.equal(document.querySelector('.seaf-author-ban-list .seaf-empty-card span').textContent, query);
-  } finally {
-    handle.cleanup();
-  }
-});
-
-test('popup clears all author bans only after confirm', async () => {
-  let confirmCalls = 0;
-  const handle = setupPopupTest({
-    storageData: {
-      seaf_settings: {
-        authorBanEntries: [
-          domain.createNicknameAuthorBanEntry('Alpha')
-        ]
-      }
-    },
-    beforeLoad(windowHandle) {
-      windowHandle.confirm = () => {
-        confirmCalls += 1;
-        return confirmCalls > 1;
-      };
-    }
-  });
-
-  try {
-    await handle.settle();
-
-    const clearButton = document.getElementById('seaf-author-ban-clear-all-button');
-    clearButton.dispatchEvent(new window.Event('click', { bubbles: true }));
-    await handle.settle();
-    assert.equal(getStoredAuthorRecords(handle).length, 1);
-
-    clearButton.dispatchEvent(new window.Event('click', { bubbles: true }));
-    await handle.settle();
-    assert.deepEqual(getStoredAuthorRecords(handle), []);
+    assert.equal(document.querySelector('.seaf-author-manager-list .seaf-empty-card span').textContent, query);
   } finally {
     handle.cleanup();
   }
@@ -1494,7 +1659,7 @@ test('popup quick ban and swap uses current author identity and preserves its no
 
     assert.equal(getStoredAuthorRecords(handle)[0].status, 'note');
     assert.equal(getStoredAuthorRecords(handle)[0].note, '\uBE60\uB978 \uBC34 \uBA54\uBAA8');
-    assert.equal(document.getElementById('seaf-author-note-count').textContent, '1개');
+    assert.equal(document.getElementById('seaf-author-manager-count').textContent, '전체 1 · 밴 0 · 메모 1');
     assert.equal(document.getElementById('seaf-author-record-undo').hidden, false);
   } finally {
     handle.cleanup();
@@ -1531,8 +1696,7 @@ test('popup quick swap atomically changes every matching record in the source st
         [uidEntry.key, 'note']
       ]
     );
-    assert.equal(document.getElementById('seaf-author-ban-count').textContent, '0개');
-    assert.equal(document.getElementById('seaf-author-note-count').textContent, '2개');
+    assert.equal(document.getElementById('seaf-author-manager-count').textContent, '전체 2 · 밴 0 · 메모 2');
     assert.equal(document.querySelector('#seaf-post-list [data-author-banned="true"]'), null);
   } finally {
     handle.cleanup();
@@ -1812,17 +1976,17 @@ test('popup keeps an edited note visible when the background rejects the save', 
   try {
     await handle.settle();
 
-    const row = document.querySelector('.seaf-author-ban-entry');
-    const noteInput = row.querySelector('.seaf-author-ban-note-editor');
+    const row = document.querySelector('.seaf-author-manager-entry');
+    const noteInput = row.querySelector('.seaf-author-record-note-editor');
     noteInput.value = 'new unsaved note';
     noteInput.dispatchEvent(new window.Event('input', { bubbles: true }));
-    row.querySelector('.seaf-author-ban-note-save')
+    row.querySelector('.seaf-author-record-note-save')
       .dispatchEvent(new window.Event('click', { bubbles: true }));
     await handle.settle();
 
     assert.equal(noteInput.value, 'new unsaved note');
     assert.equal(getStoredAuthorRecords(handle)[0].note, 'old note');
-    assert.match(row.querySelector('.seaf-author-ban-note-status').textContent, /\uC800\uC7A5\uD558\uC9C0 \uBABB/);
+    assert.match(row.querySelector('.seaf-author-record-note-status').textContent, /\uC800\uC7A5\uD558\uC9C0 \uBABB/);
   } finally {
     handle.cleanup();
   }

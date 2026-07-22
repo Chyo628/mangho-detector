@@ -648,23 +648,13 @@ body {
   font-weight: 700;
 }
 
-.seaf-author-ban-panel,
-.seaf-author-record-panel {
-  display: grid;
-  gap: 16px;
-}
-
-.seaf-author-ban-panel > .seaf-panel-head,
-.seaf-author-record-panel > .seaf-panel-head {
-  margin-bottom: 0;
-}
-
-.seaf-author-ban-controls,
-.seaf-author-ban-roster-body,
-.seaf-author-record-controls,
-.seaf-author-record-roster-body {
+.seaf-author-manager-body {
   display: grid;
   gap: 12px;
+}
+
+.seaf-author-manager-body[hidden] {
+  display: none;
 }
 
 .seaf-author-ban-policy-copy {
@@ -674,56 +664,142 @@ body {
   line-height: 1.45;
 }
 
-.seaf-author-ban-roster,
-.seaf-author-record-roster {
+.seaf-author-manager-roster {
   display: grid;
   gap: 12px;
   padding-top: 14px;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
-.seaf-author-ban-roster-head,
-.seaf-author-ban-tools,
-.seaf-author-ban-actions,
-.seaf-author-record-roster-head,
-.seaf-author-record-tools,
-.seaf-author-record-actions {
+.seaf-author-manager-roster-head,
+.seaf-author-manager-tools,
+.seaf-author-manager-selection-actions {
   display: flex;
   align-items: center;
   gap: 10px;
 }
 
-.seaf-author-ban-roster-head,
-.seaf-author-ban-tools,
-.seaf-author-record-roster-head,
-.seaf-author-record-tools {
+.seaf-author-manager-roster-head,
+.seaf-author-manager-tools {
   justify-content: space-between;
 }
 
-.seaf-author-ban-roster-title,
-.seaf-author-record-roster-title {
+.seaf-author-manager-roster-title {
   margin: 0;
   color: var(--seaf-text);
   font-size: 13px;
   font-weight: 800;
 }
 
-.seaf-author-ban-roster-copy,
-.seaf-author-record-roster-copy {
+.seaf-author-manager-roster-copy {
   margin: 3px 0 0;
   color: var(--seaf-text-muted);
   font-size: 11px;
   line-height: 1.4;
 }
 
-.seaf-author-ban-roster-body[hidden],
-.seaf-author-record-roster-body[hidden] {
+.seaf-author-manager-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.seaf-author-manager-panel > .seaf-panel-head {
+  margin-bottom: 0;
+}
+
+.seaf-author-manager-policy {
+  display: grid;
+  gap: 12px;
+}
+
+.seaf-author-manager-compose {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.seaf-author-manager-compose-fields {
+  display: grid;
+  gap: 8px;
+}
+
+.seaf-author-manager-tools {
+  flex-wrap: wrap;
+}
+
+.seaf-author-manager-filter-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.seaf-filter-chip {
+  padding: 8px 11px;
+  border: 1px solid rgba(216, 176, 78, 0.22);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--seaf-text-dim);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.seaf-filter-chip[aria-pressed="true"] {
+  border-color: rgba(216, 176, 78, 0.42);
+  background: rgba(216, 176, 78, 0.12);
+  color: var(--seaf-text);
+}
+
+.seaf-author-manager-selection-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--seaf-radius-sm);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.seaf-author-manager-selection-bar[hidden] {
   display: none;
 }
 
-.seaf-author-ban-panel[data-list-collapsed="true"] .seaf-author-ban-roster,
-.seaf-author-record-panel[data-list-collapsed="true"] .seaf-author-record-roster {
-  gap: 0;
+.seaf-author-manager-list {
+  display: grid;
+  gap: 8px;
+  max-height: 280px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.seaf-author-manager-entry {
+  display: grid;
+  gap: 8px;
+}
+
+.seaf-author-manager-entry-leading {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.seaf-author-manager-entry-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.seaf-author-manager-entry-select {
+  flex: 0 0 auto;
+}
+
+.seaf-author-manager-row-toggle {
+  padding: 0 2px;
 }
 
 .seaf-author-ban-mode {
@@ -754,20 +830,6 @@ body {
 
 .seaf-choice-chip input {
   margin: 0;
-}
-
-.seaf-author-ban-compose,
-.seaf-author-record-compose {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: stretch;
-  gap: 10px;
-}
-
-.seaf-author-ban-compose-fields,
-.seaf-author-record-compose-fields {
-  display: grid;
-  gap: 8px;
 }
 
 .seaf-author-ban-confirm-setting {
@@ -814,21 +876,6 @@ body {
   margin: 0;
 }
 
-.seaf-author-ban-actions > *,
-.seaf-author-record-actions > * {
-  flex: 1 1 0;
-}
-
-.seaf-author-ban-list,
-.seaf-author-record-list {
-  display: grid;
-  gap: 8px;
-  max-height: 230px;
-  overflow-y: auto;
-  padding-right: 2px;
-}
-
-.seaf-author-ban-entry,
 .seaf-author-record-entry {
   display: grid;
   gap: 8px;
@@ -838,7 +885,6 @@ body {
   background: rgba(255, 255, 255, 0.03);
 }
 
-.seaf-author-ban-entry-main,
 .seaf-author-record-entry-main {
   display: flex;
   align-items: center;
@@ -846,7 +892,6 @@ body {
   gap: 10px;
 }
 
-.seaf-author-ban-entry-select,
 .seaf-author-record-entry-select {
   min-width: 0;
   flex: 1 1 auto;
@@ -856,13 +901,6 @@ body {
   cursor: pointer;
 }
 
-.seaf-author-ban-checkbox,
-.seaf-author-record-checkbox {
-  flex: 0 0 auto;
-  margin: 0;
-}
-
-.seaf-author-ban-entry-copy,
 .seaf-author-record-entry-copy {
   min-width: 0;
   flex: 1 1 auto;
@@ -870,7 +908,6 @@ body {
   gap: 4px;
 }
 
-.seaf-author-ban-entry-title,
 .seaf-author-record-entry-title {
   color: var(--seaf-text);
   font-size: 13px;
@@ -878,71 +915,49 @@ body {
   word-break: break-word;
 }
 
-.seaf-author-ban-entry-meta,
 .seaf-author-record-entry-meta {
   color: var(--seaf-text-muted);
   font-size: 11px;
   word-break: break-all;
 }
 
-.seaf-author-ban-note-editor,
 .seaf-author-record-note-editor {
   flex: 1 1 auto;
   padding: 8px 10px;
   font-size: 12px;
 }
 
-.seaf-author-ban-note-row,
 .seaf-author-record-note-row {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.seaf-author-ban-note-save,
 .seaf-author-record-note-save {
   flex: 0 0 auto;
 }
 
-.seaf-author-ban-note-status,
 .seaf-author-record-note-status {
   min-height: 16px;
   color: var(--seaf-text-muted);
   font-size: 11px;
 }
 
-.seaf-author-ban-note-status[data-tone="dirty"],
 .seaf-author-record-note-status[data-tone="dirty"] {
   color: #f1d56d;
 }
 
-.seaf-author-ban-note-status[data-tone="success"],
 .seaf-author-record-note-status[data-tone="success"] {
   color: #a9dda0;
 }
 
-.seaf-author-ban-note-status[data-tone="error"],
 .seaf-author-record-note-status[data-tone="error"] {
   color: #ffb4b4;
-}
-
-.seaf-author-note-panel {
-  border-color: rgba(104, 169, 216, 0.18);
-}
-
-.seaf-author-note-panel .seaf-text-input:focus {
-  border-color: rgba(104, 169, 216, 0.5);
 }
 
 .seaf-author-record-entry[data-status="note"] {
   border-color: rgba(104, 169, 216, 0.16);
   background: rgba(104, 169, 216, 0.045);
-}
-
-.seaf-author-record-entry-actions {
-  display: flex;
-  flex: 0 0 auto;
-  gap: 6px;
 }
 
 .seaf-author-swap-button {
@@ -1109,26 +1124,22 @@ body {
     max-width: none;
   }
 
-  .seaf-author-ban-compose,
-  .seaf-author-record-compose {
+  .seaf-author-manager-compose {
     grid-template-columns: 1fr;
   }
 
-  .seaf-author-ban-tools,
-  .seaf-author-record-tools,
-  .seaf-author-ban-actions,
-  .seaf-author-record-actions,
+  .seaf-author-manager-roster-head,
+  .seaf-author-manager-tools,
+  .seaf-author-manager-selection-bar,
+  .seaf-author-manager-selection-actions,
+  .seaf-author-manager-entry-actions,
+  .seaf-author-manager-entry-leading,
   .seaf-post-author-row,
-  .seaf-author-ban-note-row,
   .seaf-author-record-note-row,
   .seaf-author-record-entry-main,
   .seaf-inline-confirm-actions {
     flex-direction: column;
     align-items: stretch;
-  }
-
-  .seaf-author-record-entry-actions {
-    width: 100%;
   }
 
   .seaf-text-input-search {

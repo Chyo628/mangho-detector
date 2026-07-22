@@ -13,6 +13,7 @@ const FETCH_TIMEOUT_MS = 10000;
 const ENTRY_TOAST_LIMIT = 3;
 const SURFACED_POST_RETENTION_MS = 20 * 60 * 1000;
 const MAX_SURFACED_POST_IDS = 200;
+const MAX_AUTHOR_NOTE_LENGTH = 240;
 
 const LABELS = {
   manghoAlert: 'MANGHO \uAC10\uC9C0',
@@ -20,6 +21,29 @@ const LABELS = {
   testAlert: '\uD14C\uC2A4\uD2B8 \uC54C\uB9BC',
   join: '\uCC38\uAC00',
   bannedJoin: '\uC8FC\uC758 \u00B7 \uCC38\uAC00',
+  authorManageAdd: '+ \uAE30\uB85D',
+  authorManageNote: '\uBA54\uBAA8',
+  authorManageBanned: '\uBC34',
+  authorManageTitle: '\uC791\uC131\uC790 \uAD00\uB9AC',
+  authorManageDisplayFallback: '\uC791\uC131\uC790',
+  authorManageMetaMissing: '\uC5C6\uC74C',
+  authorManageNickname: '\uB2C9\uB124\uC784',
+  authorManageUid: 'UID',
+  authorManageIp: 'IP',
+  authorManageNoteLabel: '\uBA54\uBAA8',
+  authorManageBanLabel: '\uBC34 \uC5EC\uBD80',
+  authorManageSave: '\uC800\uC7A5',
+  authorManageSaving: '\uC800\uC7A5 \uC911...',
+  authorManageDelete: '\uAE30\uB85D \uC0AD\uC81C',
+  authorManageDeleting: '\uC0AD\uC81C \uC911...',
+  authorManageDeleteDisabled: '\uAE30\uB85D \uC5C6\uC74C',
+  authorManageDeleteConfirm: '\uC815\uB9D0 \uC0AD\uC81C',
+  authorManageDeleteConfirmTextPrefix: '\uC77C\uCE58\uD558\uB294 \uAE30\uB85D ',
+  authorManageDeleteConfirmTextSuffix: '\uAC1C\uB97C \uC0AD\uC81C\uD569\uB2C8\uB2E4. \uD55C \uBC88 \uB354 \uB204\uB974\uBA74 \uACC4\uC18D\uD569\uB2C8\uB2E4.',
+  authorManageBroadConfirmText: '\u2018\u3147\u3147\u2019 \uB2C9\uB124\uC784 \uAE30\uB85D\uC740 \uBC94\uC704\uAC00 \uB113\uC2B5\uB2C8\uB2E4. \uD55C \uBC88 \uB354 \uC800\uC7A5\uD558\uBA74 \uACC4\uC18D\uD569\uB2C8\uB2E4.',
+  authorManageBroadScopePrefix: '\uB113\uC740 \uBC94\uC704:',
+  authorManageErrorFallback: '\uC791\uC131\uC790 \uAE30\uB85D\uC744 \uC800\uC7A5\uD558\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4.',
+  authorManageNoteRequired: '\uC77C\uBC18 \uBA54\uBAA8\uB294 \uBE44\uC5B4 \uC788\uC744 \uC218 \uC5C6\uC2B5\uB2C8\uB2E4.',
   bannedAuthorFallback: '\uBC34 \uBAA9\uB85D\uC5D0 \uC788\uB294 \uAE00\uC4F4\uC774\uC785\uB2C8\uB2E4.',
   bannedAuthorConfirmTitle: '\uBC34 \uAE00\uC4F4\uC774 \uCC38\uAC00 \uD655\uC778',
   bannedAuthorConfirmBody: '\uBC34 \uBAA9\uB85D \uAE00\uC4F4\uC774\uC785\uB2C8\uB2E4. \uCC38\uAC00\uB97C \uACC4\uC18D\uD558\uB824\uBA74 \uD55C \uBC88 \uB354 \uD655\uC778\uD558\uC138\uC694.',
@@ -73,7 +97,10 @@ const SEAFContent = {
     listenersRegistered: false,
     initPromise: null,
     initialized: false,
-    fetchRuntime: null
+    fetchRuntime: null,
+    activeAuthorManager: null,
+    authorManagerDocumentPointerHandler: null,
+    authorManagerDocumentKeyHandler: null
   },
 
   async init() {
@@ -285,7 +312,46 @@ const SEAFContent = {
       this.refreshJoinButtonStates();
     });
 
+    this.registerAuthorManagerListeners();
+
     this.state.listenersRegistered = true;
+  },
+
+  registerAuthorManagerListeners() {
+    if (!document || this.state.authorManagerDocumentPointerHandler || this.state.authorManagerDocumentKeyHandler) {
+      return;
+    }
+
+    this.state.authorManagerDocumentPointerHandler = (event) => {
+      const activeManager = this.state.activeAuthorManager;
+      if (!activeManager?.wrapper) {
+        return;
+      }
+
+      if (activeManager.wrapper.contains(event.target)) {
+        return;
+      }
+
+      this.closeAuthorManager({ restoreFocus: false });
+    };
+
+    this.state.authorManagerDocumentKeyHandler = (event) => {
+      if (event.key !== 'Escape') {
+        return;
+      }
+
+      const activeManager = this.state.activeAuthorManager;
+      if (!activeManager?.wrapper) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      this.closeAuthorManager({ restoreFocus: true });
+    };
+
+    document.addEventListener('mousedown', this.state.authorManagerDocumentPointerHandler, true);
+    document.addEventListener('keydown', this.state.authorManagerDocumentKeyHandler, true);
   },
 
   observeListChanges() {
@@ -358,7 +424,7 @@ const SEAFContent = {
         return;
       }
 
-      this.ensureJoinButton(row, parsedRow.titleLink, parsedRow.post.id, parsedRow.post.author);
+      this.ensureInlineControls(row, parsedRow.titleLink, parsedRow.post.id, parsedRow.post.author);
 
       if (
         surfaceOpenPosts &&
@@ -532,10 +598,11 @@ const SEAFContent = {
     this.processRows(this.getInitialRows(), { surfaceOpenPosts: false });
   },
 
-  ensureJoinButton(row, titleLink, postId, author) {
+  ensureInlineControls(row, titleLink, postId, author) {
     const existingButton = row.querySelector('.seaf-inline-join-button');
     if (row.hasAttribute('data-seaf-processed') && existingButton) {
       this.updateInlineJoinButton(existingButton, postId, author);
+      this.updateAuthorManageButton(row, postId, author);
       return;
     }
 
@@ -573,6 +640,7 @@ const SEAFContent = {
     button.addEventListener('click', async (event) => {
       event.preventDefault();
       event.stopPropagation();
+      this.closeAuthorManager({ restoreFocus: false });
       const result = this.requestInlineJoin(wrapper, button, postId, author);
       if (result?.action === 'execute') {
         await this.executeInlineJoin(wrapper, button, postId, author);
@@ -583,6 +651,509 @@ const SEAFContent = {
     titleLink.after(wrapper);
     row.setAttribute('data-seaf-processed', 'true');
     this.updateInlineJoinButton(button, postId, author);
+    this.updateAuthorManageButton(row, postId, author);
+  },
+
+  ensureJoinButton(row, titleLink, postId, author) {
+    this.ensureInlineControls(row, titleLink, postId, author);
+  },
+
+  updateAuthorManageButton(row, postId, author) {
+    const wrapper = row.querySelector('.seaf-inline-join-wrap');
+    if (!wrapper) {
+      return;
+    }
+
+    const existingButton = wrapper.querySelector('.seaf-inline-author-manage-button');
+    if (!author) {
+      existingButton?.remove();
+      if (this.state.activeAuthorManager?.wrapper === wrapper) {
+        this.closeAuthorManager({ restoreFocus: false });
+      }
+      return;
+    }
+
+    const authorSummary = this.getAuthorRecordSummary(author);
+    const status = authorSummary.isBanned
+      ? 'banned'
+      : (authorSummary.hasNote ? 'note' : 'none');
+    const label = status === 'banned'
+      ? LABELS.authorManageBanned
+      : (status === 'note' ? LABELS.authorManageNote : LABELS.authorManageAdd);
+    const button = existingButton || document.createElement('button');
+
+    if (!existingButton) {
+      button.type = 'button';
+      button.className = 'seaf-inline-author-manage-button';
+      button.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        this.toggleAuthorManager(row, postId, author);
+      });
+      wrapper.appendChild(button);
+    }
+
+    const popupId = `seaf-inline-author-manager-${Number(postId) || 'unknown'}`;
+    button.dataset.authorStatus = status;
+    button.dataset.authorManageStatus = status;
+    button.textContent = label;
+    button.classList.toggle('seaf-inline-author-manage-button--banned', status === 'banned');
+    button.classList.toggle('seaf-inline-author-manage-button--noted', status === 'note');
+    button.classList.toggle('seaf-inline-author-manage-button--empty', status === 'none');
+    if (this.state.activeAuthorManager?.wrapper === wrapper) {
+      button.setAttribute('aria-expanded', 'true');
+      button.setAttribute('aria-controls', popupId);
+    } else {
+      button.setAttribute('aria-expanded', 'false');
+      button.removeAttribute('aria-controls');
+    }
+  },
+
+  getAuthorManageContext(author) {
+    const normalizedAuthor = this.normalizeAuthor(author);
+    const summary = this.getAuthorRecordSummary(normalizedAuthor);
+    const displayedNote = summary.note || '';
+    const noteTargetKey = summary.noteRecord?.key || summary.primaryRecord?.key || '';
+    const matchingKeys = summary.matches.map((record) => record.key);
+    const nextStatus = summary.isBanned ? 'banned' : 'note';
+    return {
+      author: normalizedAuthor,
+      summary,
+      displayedNote,
+      noteTargetKey,
+      matchingKeys,
+      deleteCount: matchingKeys.length,
+      nextStatus
+    };
+  },
+
+  toggleAuthorManager(row, postId, author) {
+    const wrapper = row?.querySelector('.seaf-inline-join-wrap');
+    if (!wrapper || !author) {
+      return;
+    }
+
+    if (this.state.activeAuthorManager?.wrapper === wrapper) {
+      this.closeAuthorManager({ restoreFocus: true });
+      return;
+    }
+
+    this.openAuthorManager(row, postId, author);
+  },
+
+  openAuthorManager(row, postId, author) {
+    const wrapper = row?.querySelector('.seaf-inline-join-wrap');
+    const manageButton = wrapper?.querySelector('.seaf-inline-author-manage-button');
+    if (!wrapper || !manageButton || !author) {
+      return;
+    }
+
+    this.closeAuthorManager({ restoreFocus: false });
+
+    const joinGuard = wrapper.__seafJoinGuard;
+    const joinPhases = getJoinGuardNamespace().PHASES;
+    if (joinGuard) {
+      const snapshot = joinGuard.getSnapshot();
+      if (snapshot.phase === joinPhases.confirm || snapshot.phase === joinPhases.error) {
+        joinGuard.cancel();
+        const joinButton = wrapper.querySelector('.seaf-inline-join-button');
+        this.renderInlineJoinGuardState(wrapper, joinButton, postId, author);
+      }
+    }
+
+    const panel = this.ensureAuthorManagerPanel(wrapper, postId);
+    const context = this.getAuthorManageContext(author);
+    this.state.activeAuthorManager = {
+      wrapper,
+      panel,
+      button: manageButton,
+      row,
+      postId,
+      author
+    };
+    this.renderAuthorManagerPanel(this.state.activeAuthorManager, context);
+    panel.hidden = false;
+    panel.dataset.open = 'true';
+    manageButton.setAttribute('aria-expanded', 'true');
+    manageButton.setAttribute('aria-controls', panel.id);
+    this.updateAuthorManagerPlacement(panel);
+  },
+
+  closeAuthorManager({ restoreFocus = false } = {}) {
+    const activeManager = this.state.activeAuthorManager;
+    if (!activeManager) {
+      return;
+    }
+
+    const { panel, button } = activeManager;
+    if (panel) {
+      panel.hidden = true;
+      panel.dataset.open = 'false';
+      panel.removeAttribute('data-pending-action');
+    }
+    if (button) {
+      button.setAttribute('aria-expanded', 'false');
+      button.removeAttribute('aria-controls');
+      if (restoreFocus) {
+        button.focus();
+      }
+    }
+
+    this.state.activeAuthorManager = null;
+  },
+
+  ensureAuthorManagerPanel(wrapper, postId) {
+    const panelId = `seaf-inline-author-manager-${Number(postId) || 'unknown'}`;
+    let panel = wrapper.querySelector('.seaf-inline-author-manager');
+    if (panel) {
+      panel.id = panelId;
+      return panel;
+    }
+
+    panel = document.createElement('div');
+    panel.className = 'seaf-inline-author-manager';
+    panel.id = panelId;
+    panel.hidden = true;
+    panel.setAttribute('role', 'dialog');
+    panel.setAttribute('aria-modal', 'false');
+    panel.setAttribute('aria-label', LABELS.authorManageTitle);
+    panel.innerHTML = `
+      <p class="seaf-inline-author-manager-title"></p>
+      <p class="seaf-inline-author-manager-display"></p>
+      <dl class="seaf-inline-author-manager-meta"></dl>
+      <label class="seaf-inline-author-manager-field">
+        <span class="seaf-inline-author-manager-field-label"></span>
+        <textarea class="seaf-inline-author-manager-note-input" rows="3" maxlength="${MAX_AUTHOR_NOTE_LENGTH}"></textarea>
+      </label>
+      <label class="seaf-inline-author-manager-toggle">
+        <input class="seaf-inline-author-manager-ban-input" type="checkbox">
+        <span class="seaf-inline-author-manager-toggle-label"></span>
+      </label>
+      <p class="seaf-inline-author-manager-status" role="status" aria-live="polite"></p>
+      <p class="seaf-inline-author-manager-error" role="alert"></p>
+      <div class="seaf-inline-author-manager-actions">
+        <button type="button" class="seaf-inline-author-manager-delete-button"></button>
+        <button type="button" class="seaf-inline-author-manager-save-button"></button>
+      </div>
+    `;
+
+    const title = panel.querySelector('.seaf-inline-author-manager-title');
+    const noteLabel = panel.querySelector('.seaf-inline-author-manager-field-label');
+    const toggleLabel = panel.querySelector('.seaf-inline-author-manager-toggle-label');
+    const noteInput = panel.querySelector('.seaf-inline-author-manager-note-input');
+    const banInput = panel.querySelector('.seaf-inline-author-manager-ban-input');
+    const saveButton = panel.querySelector('.seaf-inline-author-manager-save-button');
+    const deleteButton = panel.querySelector('.seaf-inline-author-manager-delete-button');
+
+    title.textContent = LABELS.authorManageTitle;
+    noteLabel.textContent = LABELS.authorManageNoteLabel;
+    toggleLabel.textContent = LABELS.authorManageBanLabel;
+    saveButton.textContent = LABELS.authorManageSave;
+    deleteButton.textContent = LABELS.authorManageDelete;
+
+    noteInput.addEventListener('input', () => {
+      if (this.state.activeAuthorManager?.panel !== panel) {
+        return;
+      }
+
+      panel.dataset.pendingAction = '';
+      this.clearAuthorManagerMessages(panel);
+    });
+
+    banInput.addEventListener('change', () => {
+      if (this.state.activeAuthorManager?.panel !== panel) {
+        return;
+      }
+
+      panel.dataset.pendingAction = '';
+      this.clearAuthorManagerMessages(panel);
+    });
+
+    saveButton.addEventListener('click', async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      await this.submitAuthorManager(panel);
+    });
+
+    deleteButton.addEventListener('click', async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      await this.deleteAuthorManagerRecords(panel);
+    });
+
+    wrapper.appendChild(panel);
+    return panel;
+  },
+
+  clearAuthorManagerMessages(panel) {
+    const status = panel?.querySelector('.seaf-inline-author-manager-status');
+    const error = panel?.querySelector('.seaf-inline-author-manager-error');
+    if (status) {
+      status.textContent = '';
+    }
+    if (error) {
+      error.textContent = '';
+    }
+  },
+
+  renderAuthorManagerPanel(activeManager, context = this.getAuthorManageContext(activeManager?.author)) {
+    const panel = activeManager?.panel;
+    if (!panel || !context?.author) {
+      return;
+    }
+
+    const title = panel.querySelector('.seaf-inline-author-manager-title');
+    const display = panel.querySelector('.seaf-inline-author-manager-display');
+    const meta = panel.querySelector('.seaf-inline-author-manager-meta');
+    const noteInput = panel.querySelector('.seaf-inline-author-manager-note-input');
+    const banInput = panel.querySelector('.seaf-inline-author-manager-ban-input');
+    const saveButton = panel.querySelector('.seaf-inline-author-manager-save-button');
+    const deleteButton = panel.querySelector('.seaf-inline-author-manager-delete-button');
+
+    title.textContent = LABELS.authorManageTitle;
+    display.textContent = context.author.displayName || LABELS.authorManageDisplayFallback;
+    meta.replaceChildren(...this.buildAuthorManagerMeta(context.author));
+    noteInput.value = context.displayedNote;
+    banInput.checked = context.nextStatus === 'banned';
+    panel.dataset.deleteCount = String(context.deleteCount);
+    saveButton.textContent = LABELS.authorManageSave;
+    deleteButton.textContent = context.deleteCount > 0
+      ? LABELS.authorManageDelete
+      : LABELS.authorManageDeleteDisabled;
+    deleteButton.disabled = context.deleteCount === 0;
+    panel.dataset.pendingAction = '';
+    this.clearAuthorManagerMessages(panel);
+  },
+
+  buildAuthorManagerMeta(author) {
+    const rows = [
+      [LABELS.authorManageNickname, author?.nickname || LABELS.authorManageMetaMissing],
+      [LABELS.authorManageUid, author?.uid || LABELS.authorManageMetaMissing],
+      [LABELS.authorManageIp, author?.ip || LABELS.authorManageMetaMissing]
+    ];
+
+    return rows.flatMap(([label, value]) => {
+      const term = document.createElement('dt');
+      const detail = document.createElement('dd');
+      term.textContent = label;
+      detail.textContent = value;
+      return [term, detail];
+    });
+  },
+
+  updateAuthorManagerPlacement(panel) {
+    if (!panel) {
+      return;
+    }
+
+    panel.style.transform = '';
+    const panelRect = panel.getBoundingClientRect();
+    const safePadding = 8;
+    let offsetX = 0;
+    let offsetY = 0;
+
+    if (panelRect.left < safePadding) {
+      offsetX = safePadding - panelRect.left;
+    } else if (panelRect.right > window.innerWidth - safePadding) {
+      offsetX = (window.innerWidth - safePadding) - panelRect.right;
+    }
+
+    if (panelRect.bottom > window.innerHeight - safePadding) {
+      offsetY = (window.innerHeight - safePadding) - panelRect.bottom;
+    }
+    if (panelRect.top + offsetY < safePadding) {
+      offsetY = safePadding - panelRect.top;
+    }
+
+    const transforms = [];
+    if (offsetX !== 0) {
+      transforms.push(`translateX(${Math.round(offsetX)}px)`);
+    }
+    if (offsetY !== 0) {
+      transforms.push(`translateY(${Math.round(offsetY)}px)`);
+    }
+    panel.style.transform = transforms.join(' ');
+  },
+
+  setAuthorManagerPending(panel, isPending, action = '') {
+    if (!panel) {
+      return;
+    }
+
+    const deleteCount = Number(panel.dataset.deleteCount || '0');
+    const hasDeletableRecords = Number.isFinite(deleteCount) && deleteCount > 0;
+    const controls = panel.querySelectorAll('button, textarea, input');
+    controls.forEach((control) => {
+      control.disabled = isPending;
+    });
+
+    panel.dataset.pending = String(isPending);
+    panel.dataset.pendingAction = action;
+    const saveButton = panel.querySelector('.seaf-inline-author-manager-save-button');
+    const deleteButton = panel.querySelector('.seaf-inline-author-manager-delete-button');
+    const noteInput = panel.querySelector('.seaf-inline-author-manager-note-input');
+    const banInput = panel.querySelector('.seaf-inline-author-manager-ban-input');
+    if (!isPending) {
+      if (noteInput) {
+        noteInput.disabled = false;
+      }
+      if (banInput) {
+        banInput.disabled = false;
+      }
+      if (saveButton) {
+        saveButton.disabled = false;
+      }
+      if (deleteButton) {
+        deleteButton.disabled = !hasDeletableRecords;
+      }
+    }
+    if (saveButton) {
+      saveButton.textContent = action === 'save'
+        ? LABELS.authorManageSaving
+        : LABELS.authorManageSave;
+    }
+    if (deleteButton) {
+      deleteButton.textContent = action === 'delete'
+        ? LABELS.authorManageDeleting
+        : (hasDeletableRecords ? LABELS.authorManageDelete : LABELS.authorManageDeleteDisabled);
+    }
+  },
+
+  isBroadNicknameOnlyAuthor(author) {
+    const normalizedAuthor = this.normalizeAuthor(author);
+    return Boolean(
+      normalizedAuthor
+      && !normalizedAuthor.uid
+      && !normalizedAuthor.ip
+      && normalizedAuthor.nickname === '\u3147\u3147'
+    );
+  },
+
+  async applyUpdatedSettings(settings) {
+    this.state.settings = this.normalizeSettings(settings);
+    this.refreshJoinButtonStates();
+  },
+
+  async sendAuthorRecordMessage(message) {
+    const response = await chrome.runtime.sendMessage(message);
+    if (!response?.success) {
+      throw new Error(response?.error || LABELS.authorManageErrorFallback);
+    }
+
+    await this.applyUpdatedSettings(response.settings);
+    return response;
+  },
+
+  async submitAuthorManager(panel) {
+    const activeManager = this.state.activeAuthorManager;
+    if (!activeManager || activeManager.panel !== panel) {
+      return;
+    }
+
+    const context = this.getAuthorManageContext(activeManager.author);
+    const noteInput = panel.querySelector('.seaf-inline-author-manager-note-input');
+    const banInput = panel.querySelector('.seaf-inline-author-manager-ban-input');
+    const statusMessage = panel.querySelector('.seaf-inline-author-manager-status');
+    const errorMessage = panel.querySelector('.seaf-inline-author-manager-error');
+    const nextNote = globalThis.SEAFDomain.normalizeAuthorNote(noteInput.value);
+    const nextStatus = banInput.checked ? 'banned' : 'note';
+    const pendingAction = panel.dataset.pendingAction || '';
+    const needsBroadConfirm = context.matchingKeys.length === 0
+      && this.isBroadNicknameOnlyAuthor(activeManager.author);
+
+    this.clearAuthorManagerMessages(panel);
+
+    if (nextStatus === 'note' && !nextNote) {
+      errorMessage.textContent = LABELS.authorManageNoteRequired;
+      return;
+    }
+
+    if (needsBroadConfirm && pendingAction !== 'confirm-broad') {
+      panel.dataset.pendingAction = 'confirm-broad';
+      statusMessage.textContent = LABELS.authorManageBroadConfirmText;
+      return;
+    }
+
+    this.setAuthorManagerPending(panel, true, 'save');
+
+    try {
+      if (context.matchingKeys.length === 0) {
+        await this.sendAuthorRecordMessage({
+          type: 'ADD_AUTHOR_RECORD',
+          author: activeManager.author,
+          note: nextNote,
+          status: nextStatus
+        });
+      } else {
+        if (context.noteTargetKey && nextNote !== context.displayedNote) {
+          await this.sendAuthorRecordMessage({
+            type: 'UPDATE_AUTHOR_RECORD_NOTE',
+            key: context.noteTargetKey,
+            note: nextNote
+          });
+        }
+
+        const statusKeys = context.summary.matches
+          .filter((record) => record.status !== nextStatus)
+          .map((record) => record.key);
+        if (statusKeys.length > 0) {
+          await this.sendAuthorRecordMessage({
+            type: 'SET_AUTHOR_RECORD_STATUS',
+            keys: statusKeys,
+            status: nextStatus
+          });
+        }
+      }
+
+      this.closeAuthorManager({ restoreFocus: false });
+    } catch (error) {
+      errorMessage.textContent = String(error?.message || error || LABELS.authorManageErrorFallback).trim();
+      this.setAuthorManagerPending(panel, false);
+      noteInput.value = nextNote;
+      banInput.checked = nextStatus === 'banned';
+      return;
+    }
+
+    this.setAuthorManagerPending(panel, false);
+  },
+
+  async deleteAuthorManagerRecords(panel) {
+    const activeManager = this.state.activeAuthorManager;
+    if (!activeManager || activeManager.panel !== panel) {
+      return;
+    }
+
+    const context = this.getAuthorManageContext(activeManager.author);
+    if (context.deleteCount === 0) {
+      return;
+    }
+
+    const statusMessage = panel.querySelector('.seaf-inline-author-manager-status');
+    const errorMessage = panel.querySelector('.seaf-inline-author-manager-error');
+    const deleteButton = panel.querySelector('.seaf-inline-author-manager-delete-button');
+    const pendingAction = panel.dataset.pendingAction || '';
+
+    this.clearAuthorManagerMessages(panel);
+
+    if (pendingAction !== 'confirm-delete') {
+      panel.dataset.pendingAction = 'confirm-delete';
+      statusMessage.textContent = `${LABELS.authorManageDeleteConfirmTextPrefix}${context.deleteCount}${LABELS.authorManageDeleteConfirmTextSuffix}`;
+      deleteButton.textContent = LABELS.authorManageDeleteConfirm;
+      return;
+    }
+
+    this.setAuthorManagerPending(panel, true, 'delete');
+
+    try {
+      await this.sendAuthorRecordMessage({
+        type: 'REMOVE_AUTHOR_RECORD_KEYS',
+        keys: context.matchingKeys
+      });
+      this.closeAuthorManager({ restoreFocus: false });
+    } catch (error) {
+      errorMessage.textContent = String(error?.message || error || LABELS.authorManageErrorFallback).trim();
+      this.setAuthorManagerPending(panel, false);
+    }
   },
 
   updateInlineJoinButton(button, postId, author) {

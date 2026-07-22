@@ -20,6 +20,46 @@
   transition: transform 160ms ease, background 160ms ease !important;
 }
 
+.seaf-inline-author-manage-button {
+  margin-left: 0 !important;
+  border: 1px solid rgba(255, 255, 255, 0.18) !important;
+  border-radius: 6px !important;
+  background: #1f2733 !important;
+  color: #f4f7fb !important;
+  padding: 4px 8px !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  cursor: pointer !important;
+  transition: transform 160ms ease, background 160ms ease, border-color 160ms ease !important;
+}
+
+.seaf-inline-author-manage-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  background: #2a3443 !important;
+}
+
+.seaf-inline-author-manage-button--empty {
+  background: #29303a !important;
+}
+
+.seaf-inline-author-manage-button--noted {
+  background: #1e5ca1 !important;
+  border-color: rgba(128, 190, 255, 0.42) !important;
+}
+
+.seaf-inline-author-manage-button--noted:hover:not(:disabled) {
+  background: #2870bd !important;
+}
+
+.seaf-inline-author-manage-button--banned {
+  background: #8f2f2f !important;
+  border-color: rgba(255, 150, 150, 0.42) !important;
+}
+
+.seaf-inline-author-manage-button--banned:hover:not(:disabled) {
+  background: #a83c3c !important;
+}
+
 .seaf-inline-join-button:hover:not(:disabled) {
   transform: translateY(-1px);
   background: #ffd84a !important;
@@ -132,6 +172,151 @@
   color: #ffe7e7 !important;
 }
 
+.seaf-inline-author-manager {
+  position: absolute !important;
+  top: calc(100% + 8px) !important;
+  right: 0 !important;
+  left: auto !important;
+  z-index: 2147483646 !important;
+  width: min(340px, calc(100vw - 24px)) !important;
+  max-height: calc(100vh - 16px) !important;
+  overflow-y: auto !important;
+  box-sizing: border-box !important;
+  padding: 12px !important;
+  border: 1px solid rgba(126, 172, 235, 0.35) !important;
+  border-radius: 12px !important;
+  background: #111821 !important;
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.36) !important;
+  color: #eef4fb !important;
+}
+
+.seaf-inline-author-manager[hidden] {
+  display: none !important;
+}
+
+.seaf-inline-author-manager-title,
+.seaf-inline-author-manager-display,
+.seaf-inline-author-manager-status,
+.seaf-inline-author-manager-error {
+  margin: 0 0 8px !important;
+}
+
+.seaf-inline-author-manager-title {
+  font-size: 12px !important;
+  font-weight: 800 !important;
+}
+
+.seaf-inline-author-manager-display {
+  font-size: 13px !important;
+  font-weight: 700 !important;
+  word-break: break-word !important;
+}
+
+.seaf-inline-author-manager-meta {
+  display: grid !important;
+  grid-template-columns: auto 1fr !important;
+  gap: 4px 8px !important;
+  margin: 0 0 10px !important;
+  font-size: 12px !important;
+  line-height: 1.45 !important;
+}
+
+.seaf-inline-author-manager-meta dt {
+  color: #9db0c6 !important;
+  font-weight: 700 !important;
+}
+
+.seaf-inline-author-manager-meta dd {
+  margin: 0 !important;
+  word-break: break-word !important;
+}
+
+.seaf-inline-author-manager-field,
+.seaf-inline-author-manager-toggle {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 6px !important;
+  margin: 0 0 10px !important;
+}
+
+.seaf-inline-author-manager-field-label,
+.seaf-inline-author-manager-toggle-label {
+  font-size: 12px !important;
+  font-weight: 700 !important;
+}
+
+.seaf-inline-author-manager-note-input {
+  width: 100% !important;
+  min-height: 72px !important;
+  border: 1px solid rgba(255, 255, 255, 0.18) !important;
+  border-radius: 8px !important;
+  background: #0a1017 !important;
+  color: #f5f8fc !important;
+  padding: 8px 10px !important;
+  font-size: 12px !important;
+  line-height: 1.45 !important;
+  resize: vertical !important;
+  box-sizing: border-box !important;
+}
+
+.seaf-inline-author-manager-toggle {
+  flex-direction: row !important;
+  align-items: center !important;
+}
+
+.seaf-inline-author-manager-ban-input {
+  margin: 0 !important;
+}
+
+.seaf-inline-author-manager-status,
+.seaf-inline-author-manager-error {
+  min-height: 18px !important;
+  font-size: 12px !important;
+  line-height: 1.45 !important;
+  word-break: break-word !important;
+}
+
+.seaf-inline-author-manager-status {
+  color: #ffda8c !important;
+}
+
+.seaf-inline-author-manager-error {
+  color: #ff9f9f !important;
+}
+
+.seaf-inline-author-manager-status:empty,
+.seaf-inline-author-manager-error:empty {
+  min-height: 0 !important;
+  margin-bottom: 0 !important;
+}
+
+.seaf-inline-author-manager-actions {
+  display: flex !important;
+  justify-content: space-between !important;
+  gap: 8px !important;
+  margin-top: 10px !important;
+}
+
+.seaf-inline-author-manager-delete-button,
+.seaf-inline-author-manager-save-button {
+  border: none !important;
+  border-radius: 8px !important;
+  padding: 7px 11px !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  cursor: pointer !important;
+}
+
+.seaf-inline-author-manager-delete-button {
+  background: rgba(255, 255, 255, 0.12) !important;
+  color: #f4f7fb !important;
+}
+
+.seaf-inline-author-manager-save-button {
+  background: #f2c511 !important;
+  color: #1a1a1a !important;
+}
+
 .seaf-inline-join-confirm[hidden] {
   display: none !important;
 }
@@ -185,6 +370,14 @@
 }
 
 .seaf-inline-join-button:disabled {
+  opacity: 0.65;
+  cursor: wait !important;
+}
+
+.seaf-inline-author-manage-button:disabled,
+.seaf-inline-author-manager button:disabled,
+.seaf-inline-author-manager textarea:disabled,
+.seaf-inline-author-manager input:disabled {
   opacity: 0.65;
   cursor: wait !important;
 }

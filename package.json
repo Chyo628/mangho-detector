@@ -2,7 +2,7 @@
   "name": "mangho-detector",
   "description": "Chrome extension that detects Helldivers hellmangho recruitment posts and surfaces them with browser overlays and a dashboard.",
   "private": true,
-  "version": "0.9.0",
+  "version": "0.10.0",
   "license": "MIT",
   "engines": {
     "node": ">=18"
